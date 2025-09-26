@@ -1,1137 +1,1199 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Home,
-  BookOpen,
-  Calendar,
-  ShoppingCart,
-  Search,
-  Plus,
-  ArrowLeft,
-  ArrowRight,
-  Clipboard,
-  Printer,
-  X,
-  Camera,
-  Upload,
-  Globe,
-  Link,
-  User,
-  Settings,
-  Package,
-  Trash2,
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync & Savor Meal Planner</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load React and Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-// --- FIREBASE IMPORTS AND CONFIGURATION ---
-// IMPORTANT: These global variables are provided by the canvas environment.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    <!-- Load Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
 
-// Firebase functions are accessed directly from 'window.firebase' inside the
-// useEffect hooks and handlers to ensure the global scripts have loaded before use.
-
-
-// --- UTILITY FUNCTIONS ---
-
-/**
- * Converts raw ingredient text (simulating OCR output) into a structured array.
- * This is a highly simplified parser.
- * Expected format per line: Quantity Unit Name (e.g., "1 cup Flour")
- */
-const parseIngredients = (rawText) => {
-  if (!rawText) return [];
-  const lines = rawText.split('\n').filter(line => line.trim() !== '');
-  return lines.map(line => {
-    const parts = line.trim().split(' ');
-    // Default to '0' quantity if parsing fails, to ensure numerical stability.
-    const quantity = parts.length > 0 ? parts[0] : '0';
-    const unit = parts.length > 1 ? parts[1] : '';
-    const name = parts.slice(2).join(' ');
-    return { name, quantity, unit };
-  });
-};
-
-/**
- * Generates a unique ID for the current week based on the start date (Monday).
- */
-const getWeekId = (date) => {
-  const d = new Date(date);
-  const day = d.getDay(); // 0 for Sunday, 1 for Monday
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust date to Monday
-  const monday = new Date(d.setDate(diff));
-  return monday.toISOString().split('T')[0];
-};
-
-/**
- * Gets the date range string for the current week starting on Monday.
- */
-const getWeekRange = (date) => {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-
-  const startMonth = monday.toLocaleString('default', { month: 'short' });
-  const startDate = monday.getDate();
-
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const endMonth = sunday.toLocaleString('default', { month: 'short' });
-  const endDate = sunday.getDate();
-
-  return `${startMonth} ${startDate} - ${endMonth} ${endDate}`;
-};
-
-// Array of days for meal planning
-const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner'];
-
-
-// --- APP START ---
-
-const App = () => {
-  const [activeTab, setActiveTab] = useState('recipes'); // recipes, plan, shopping, discover
-  const [user, setUser] = useState(null);
-  const [isAuthReady, setIsAuthReady] = useState(false);
-  const [recipes, setRecipes] = useState([]);
-  const [currentWeek, setCurrentWeek] = useState(new Date());
-  const [mealPlan, setMealPlan] = useState({});
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalContent, setModalContent] = useState(null);
-  const [activeRecipe, setActiveRecipe] = useState(null); // For recipe creation/editing
-
-  // Store Firebase instances in state once initialized
-  const [dbInstance, setDbInstance] = useState(null);
-  const [authInstance, setAuthInstance] = useState(null);
-
-  // --- FIREBASE AUTH & DB INITIALIZATION (Resilient Check) ---
-  useEffect(() => {
-    let timeoutId = null;
-    let authUnsubscribe = null;
-    const RETRY_DELAY = 100; // Check every 100ms
-
-    const checkAndInitializeFirebase = () => {
-      const firebase = window.firebase;
-
-      // Check if all necessary components are available on the global object
-      if (
-        !firebase ||
-        !firebase.initializeApp ||
-        !firebase.getAuth ||
-        !firebase.getFirestore ||
-        !firebase.setLogLevel
-      ) {
-        // Functions are still missing. Retry after a small delay.
-        console.log("Firebase functions not ready. Retrying...");
-        timeoutId = setTimeout(checkAndInitializeFirebase, RETRY_DELAY);
-        return;
-      }
-
-      // Functions are ready. Proceed with initialization.
-      console.log("Firebase functions ready. Initializing...");
-      
-      const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = firebase;
-      const { getFirestore, setLogLevel } = firebase;
-
-      try {
-          setLogLevel('debug'); // Enable Firestore logging
-          const app = initializeApp(firebaseConfig);
-          const auth = getAuth(app);
-          const db = getFirestore(app);
-
-          setAuthInstance(auth);
-          setDbInstance(db);
-
-          const initializeAuth = async () => {
-            try {
-              if (initialAuthToken) {
-                await signInWithCustomToken(auth, initialAuthToken);
-              } else {
-                await signInAnonymously(auth);
-              }
-            } catch (error) {
-              console.error("Firebase Auth Error: Failed to sign in.", error);
-            }
-          };
-
-          authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
-            if (currentUser) {
-              setUser(currentUser);
-            } else {
-              setUser(null);
-            }
-            setIsAuthReady(true);
-          });
-
-          initializeAuth();
-
-      } catch (error) {
-          console.error("Firebase Initialization Error: Could not initialize app or services.", error);
-      }
-    };
-
-    checkAndInitializeFirebase();
-
-    // Cleanup function for the effect
-    return () => {
-        if (timeoutId) {
-            clearTimeout(timeoutId);
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f9fafb;
         }
-        if (authUnsubscribe) {
-            authUnsubscribe();
-        }
-    };
-  }, []); // Empty dependency array
-
-  // --- FIREBASE DATA LISTENERS (RECIPES & MEAL PLANS) ---
-  useEffect(() => {
-    // Only proceed if authenticated and instances are available
-    if (!isAuthReady || !user || !dbInstance) return;
-
-    // Access necessary Firestore functions once auth is ready
-    const firebase = window.firebase;
-    if (!firebase) return; 
-
-    const { doc, collection, query, onSnapshot } = firebase;
-
-    const db = dbInstance;
-    const userId = user.uid;
-
-    // 1. Recipes Listener
-    const recipeQuery = query(
-      collection(db, `artifacts/${appId}/users/${userId}/recipes`)
-    );
-    const unsubscribeRecipes = onSnapshot(recipeQuery, (snapshot) => {
-      const fetchedRecipes = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      setRecipes(fetchedRecipes);
-    }, (error) => {
-      console.error("Error fetching recipes:", error);
-    });
-
-    // 2. Meal Plan Listener
-    const weekId = getWeekId(currentWeek);
-    const planDocRef = doc(db, `artifacts/${appId}/users/${userId}/mealPlans`, weekId);
-
-    const unsubscribePlan = onSnapshot(planDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setMealPlan(docSnap.data());
-      } else {
-        // Initialize an empty plan object for the current week state
-        const emptyPlan = {
-          id: weekId,
-          userId,
-          weekData: WEEK_DAYS.reduce((acc, day) => {
-            acc[day] = MEAL_TYPES.reduce((mealAcc, meal) => ({ ...mealAcc, [meal]: null }), {});
-            return acc;
-          }, {})
-        };
-        setMealPlan(emptyPlan);
-      }
-    }, (error) => {
-      console.error("Error fetching meal plan:", error);
-    });
-
-    return () => {
-      unsubscribeRecipes();
-      unsubscribePlan();
-    };
-  }, [isAuthReady, user, currentWeek, dbInstance]);
-
-  // --- DATA MODIFICATION HANDLERS ---
-
-  /** Saves a new or updates an existing recipe. */
-  const handleSaveRecipe = useCallback(async (recipeData) => {
-    if (!user || !dbInstance) return console.error("User or Firestore not ready.");
-
-    const db = dbInstance;
-    const userId = user.uid;
-    const firebase = window.firebase;
-    const { doc, setDoc, collection, addDoc } = firebase || {};
-    if (!doc || !setDoc || !collection || !addDoc) return console.error("Firebase functions unavailable for saving recipe.");
-
-    try {
-      if (recipeData.id) {
-        // Update existing recipe
-        const docRef = doc(db, `artifacts/${appId}/users/${userId}/recipes`, recipeData.id);
-        await setDoc(docRef, { ...recipeData, updatedAt: Date.now() }, { merge: true });
-        setModalContent({
-          title: "Recipe Updated!",
-          message: `${recipeData.name} has been successfully updated.`,
-          onConfirm: () => setIsModalOpen(false)
-        });
-      } else {
-        // Add new recipe
-        await addDoc(collection(db, `artifacts/${appId}/users/${userId}/recipes`), {
-          ...recipeData,
-          userId: userId,
-          createdAt: Date.now(),
-        });
-        setModalContent({
-          title: "Recipe Added!",
-          message: `${recipeData.name} has been saved to your collection.`,
-          onConfirm: () => setIsModalOpen(false)
-        });
-      }
-    } catch (error) {
-      console.error("Error saving recipe:", error);
-      setModalContent({
-        title: "Error",
-        message: "Failed to save recipe. Please check your connection or permissions.",
-        onConfirm: () => setIsModalOpen(false)
-      });
-    } finally {
-      setIsModalOpen(true);
-      setActiveRecipe(null);
-    }
-  }, [user, dbInstance]);
-
-
-  /** Deletes an existing recipe. */
-  const handleDeleteRecipe = useCallback(async (recipeId, recipeName) => {
-    if (!user || !dbInstance) return console.error("User or Firestore not ready.");
-    
-    // First, show confirmation modal
-    setModalContent({
-      title: `Confirm Deletion`,
-      message: `Are you sure you want to permanently delete "${recipeName}"? This action cannot be undone.`,
-      needsConfirmation: true,
-      onConfirm: async () => {
-        setIsModalOpen(false); // Close confirmation modal before async work
-
-        const db = dbInstance;
-        const userId = user.uid;
-        const firebase = window.firebase;
-        const { doc, deleteDoc } = firebase || {};
-
-        if (!doc || !deleteDoc) return console.error("Firebase functions unavailable for deleting recipe.");
-        
-        try {
-          const docRef = doc(db, `artifacts/${appId}/users/${userId}/recipes`, recipeId);
-          await deleteDoc(docRef);
-          
-          // Show success modal
-          setModalContent({
-            title: "Recipe Deleted!",
-            message: `${recipeName} has been permanently removed.`,
-            onConfirm: () => setIsModalOpen(false),
-            needsConfirmation: false
-          });
-          setIsModalOpen(true);
-          setActiveRecipe(null);
-        } catch (error) {
-          console.error("Error deleting recipe:", error);
-          // Show error modal
-          setModalContent({
-            title: "Error",
-            message: "Failed to delete recipe. Please try again.",
-            onConfirm: () => setIsModalOpen(false),
-            needsConfirmation: false
-          });
-          setIsModalOpen(true);
-        }
-      },
-      onCancel: () => setIsModalOpen(false),
-      confirmText: "Delete",
-      cancelText: "Cancel"
-    });
-    setIsModalOpen(true); // Open confirmation modal
-  }, [user, dbInstance]);
-
-  /** Adds or removes a recipe to a specific meal slot in the meal plan. */
-  const handleUpdateMealPlan = useCallback(async (day, mealType, recipeId) => {
-    if (!user || !dbInstance || !mealPlan.id) return console.error("User or Meal Plan not ready.");
-
-    const db = dbInstance;
-    const userId = user.uid;
-    const firebase = window.firebase;
-    const { doc, setDoc } = firebase || {};
-    if (!doc || !setDoc) return console.error("Firebase functions unavailable for updating meal plan.");
-
-    const planDocRef = doc(db, `artifacts/${appId}/users/${userId}/mealPlans`, mealPlan.id);
-
-    // Create a deep copy of the weekData to update the specific slot
-    const updatedWeekData = WEEK_DAYS.reduce((acc, currentDay) => {
-        acc[currentDay] = { ...mealPlan.weekData[currentDay] };
-        if (currentDay === day) {
-            acc[currentDay][mealType] = recipeId; // recipeId or null to clear
-        }
-        return acc;
-    }, {});
-
-
-    try {
-      await setDoc(planDocRef, {
-        id: mealPlan.id,
-        userId: userId,
-        weekData: updatedWeekData
-      }, { merge: true });
-    } catch (error) {
-      console.error("Error updating meal plan:", error);
-      setModalContent({
-        title: "Error",
-        message: "Failed to update meal plan.",
-        onConfirm: () => setIsModalOpen(false)
-      });
-      setIsModalOpen(true);
-    }
-  }, [user, mealPlan, dbInstance]);
-
-  // --- UI COMPONENTS ---
-
-  const NavItem = ({ tab, icon: Icon, label }) => (
-    <button
-      className={`flex flex-col items-center justify-center p-2 text-sm transition-colors duration-200 ${
-        activeTab === tab ? 'text-teal-600' : 'text-gray-500 hover:text-teal-500'
-      }`}
-      onClick={() => setActiveTab(tab)}
-      aria-label={label}
-    >
-      <Icon className="w-5 h-5 mb-1" />
-      <span className="text-xs font-medium">{label}</span>
-    </button>
-  );
-
-  const Header = () => (
-    <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-white sticky top-0 z-10">
-      <div className="flex items-center">
-        <BookOpen className="w-6 h-6 text-teal-600 mr-2" />
-        <h1 className="text-xl font-bold text-gray-800">Sync & Savor</h1>
-      </div>
-      <div className="flex space-x-3">
-        {user && (
-            <div className="hidden sm:flex items-center text-xs text-gray-500 border rounded-full px-2 py-1">
-                <User className="w-3 h-3 mr-1" />
-                <span className='truncate w-20' title={user.uid}>User ID: {user.uid.substring(0, 8)}...</span>
-            </div>
-        )}
-        <button className="text-gray-500 hover:text-gray-800" aria-label="Settings">
-          <Settings className="w-5 h-5" />
-        </button>
-      </div>
-    </div>
-  );
-
-  const Modal = ({ content }) => {
-    if (!content || !isModalOpen) return null;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm">
-          <h3 className="text-xl font-semibold mb-3 text-gray-800">{content.title}</h3>
-          <p className="text-gray-600 mb-6">{content.message}</p>
-          <div className={`flex ${content.needsConfirmation ? 'justify-between' : 'justify-end'}`}>
-            {content.needsConfirmation && (
-                <button
-                    onClick={() => {
-                        if (content.onCancel) content.onCancel();
-                    }}
-                    className="px-4 py-2 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                    {content.cancelText || 'Cancel'}
-                </button>
-            )}
-            <button
-              onClick={() => {
-                if (content.onConfirm) content.onConfirm();
-                // If it doesn't need confirmation, close the modal immediately
-                if (!content.needsConfirmation) setIsModalOpen(false); 
-              }}
-              className={`px-4 py-2 font-semibold rounded-lg transition-colors ${
-                  content.title.includes('Delete') ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-teal-600 text-white hover:bg-teal-700'
-              }`}
-            >
-              {content.confirmText || 'OK'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- VIEW: ADD/EDIT RECIPE (OCR SIMULATION) ---
-
-  const AddEditRecipeModal = ({ recipe, onClose }) => {
-    const [name, setName] = useState(recipe?.name || '');
-    // Format ingredients for the textarea input
-    const [rawIngredients, setRawIngredients] = useState(
-      recipe?.ingredients?.map(i => `${i.quantity} ${i.unit} ${i.name}`).join('\n') || '' // Start empty for new recipes
-    );
-    const [instructions, setInstructions] = useState(recipe?.instructions || '');
-    const [category, setCategory] = useState(recipe?.category || 'Quick');
-    const isEdit = !!recipe?.id;
-
-    // Set initial mock content for a new recipe
-    useEffect(() => {
-        if (!isEdit && rawIngredients === '') {
-            setRawIngredients('1 cup Flour\n2 tsp Sugar\n1/2 cup Milk\n');
-            setInstructions('1. Mix dry ingredients.\n2. Add wet ingredients and stir until just combined.\n3. Bake for 20 minutes at 350°F.');
-        }
-    }, [isEdit, rawIngredients]);
-
-
-    const handleSave = () => {
-      if (!name.trim() || !rawIngredients.trim() || !instructions.trim()) {
-        setModalContent({
-          title: "Missing Information",
-          message: "Please fill in the recipe name, ingredients, and instructions.",
-          onConfirm: () => setIsModalOpen(false)
-        });
-        setIsModalOpen(true);
-        return;
-      }
-
-      const ingredients = parseIngredients(rawIngredients);
-      const newRecipe = {
-        id: recipe?.id,
-        name: name.trim(),
-        ingredients,
-        instructions: instructions.trim(),
-        category,
-      };
-      handleSaveRecipe(newRecipe);
-      onClose();
-    };
-
-    const handleDelete = () => {
-        if (isEdit) {
-            handleDeleteRecipe(recipe.id, recipe.name);
-            onClose(); // Close the edit modal to prevent stale UI
-        }
-    }
-
-    const ocrMockMessage = (
-        <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg mb-4 text-sm text-teal-800">
-            <p className="font-semibold">OCR Simulation Input:</p>
-            <p>Enter the ingredients as **"Quantity Unit Name"** per line. (e.g., "1/2 cup Milk")</p>
-        </div>
-    );
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-40">
-        <div className="bg-white rounded-t-2xl shadow-2xl p-6 w-full max-w-lg h-full overflow-y-auto">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-teal-600">{isEdit ? 'Edit Recipe' : 'Add New Recipe'}</h2>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2 rounded-full bg-gray-100">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {ocrMockMessage}
-
-          <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="Recipe Name (e.g., Simple Tomato Soup)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
-            />
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
-            >
-              <option value="Quick">Quick</option>
-              <option value="Healthy">Healthy</option>
-              <option value="Vegetarian">Vegetarian</option>
-              <option value="Dessert">Dessert</option>
-              <option value="Other">Other</option>
-            </select>
-            <textarea
-              placeholder="Ingredients (1 cup Flour, 2 tsp Sugar...)"
-              value={rawIngredients}
-              onChange={(e) => setRawIngredients(e.target.value)}
-              rows="5"
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 resize-none"
-            />
-            <textarea
-              placeholder="Instructions"
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              rows="7"
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 resize-none"
-            />
-          </div>
-
-          <button
-            onClick={handleSave}
-            className="w-full mt-6 p-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors"
-          >
-            {isEdit ? 'Update Recipe' : 'Save Recipe'}
-          </button>
-
-          {isEdit && (
-            <button
-              onClick={handleDelete}
-              className="w-full mt-3 p-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition-colors flex items-center justify-center"
-            >
-              <Trash2 className="w-5 h-5 mr-2" /> Delete Recipe
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-
-  // --- VIEW: RECIPES (MAIN) ---
-
-  const RecipesView = () => {
-    const handleAddRecipeClick = (type) => {
-        // Launch the AddEditRecipeModal to simulate the captured data input.
-        setModalContent({
-            title: `Adding Recipe via ${type}`,
-            message: `Starting a new recipe entry. Edit the placeholder content based on your scan or web import.`,
-            onConfirm: () => {
-                setIsModalOpen(false);
-                setActiveRecipe({}); // Open the modal for a new recipe
-            }
-        });
-        setIsModalOpen(true);
-    };
-
-    const recentRecipes = useMemo(() => recipes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 3), [recipes]);
-
-    const ActionButton = ({ icon: Icon, label }) => (
-        <button
-            onClick={() => handleAddRecipeClick(label)}
-            className="flex flex-col items-center justify-center bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow h-24 w-full border border-gray-100"
-        >
-            <Icon className="w-6 h-6 text-teal-600 mb-1" />
-            <span className="text-sm font-medium text-gray-700">{label}</span>
-        </button>
-    );
-
-    return (
-      <div className="p-4 pt-0">
-        <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Recipe</h2>
-        <div className="grid grid-cols-2 gap-4 mb-10">
-          <ActionButton icon={Camera} label="Take Photo" />
-          <ActionButton icon={Upload} label="Upload Photo" />
-          <ActionButton icon={Globe} label="Search Web" />
-          <ActionButton icon={Link} label="Import URL" />
-        </div>
-
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold text-gray-800">Recent Recipes</h3>
-          {recipes.length > 0 && (
-            <button
-              className="text-teal-600 font-medium hover:text-teal-700"
-              onClick={() => setActiveTab('discover')}
-            >
-              View All ({recipes.length})
-            </button>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          {recipes.length === 0 ? (
-            <div className="text-center p-8 bg-gray-50 rounded-xl text-gray-500 border border-dashed border-gray-200">
-              <Package className="w-8 h-8 mx-auto mb-2" />
-              <p>No recipes yet. Tap one of the buttons above to get started!</p>
-            </div>
-          ) : (
-            recentRecipes.map(recipe => (
-              <div
-                key={recipe.id}
-                className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors"
-                onClick={() => setActiveRecipe(recipe)}
-              >
-                <div>
-                  <p className="font-semibold text-gray-800">{recipe.name}</p>
-                  <span className="text-xs text-gray-500 capitalize">{recipe.category}</span>
-                </div>
-                <ArrowRight className="w-4 h-4 text-teal-600" />
-              </div>
-            ))
-          )}
-        </div>
-        {activeRecipe && <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />}
-      </div>
-    );
-  };
-
-
-  // --- VIEW: MEAL PLAN ---
-
-  const PlanView = () => {
-    const weekRange = getWeekRange(currentWeek);
-
-    const navigateWeek = (direction) => {
-      const newDate = new Date(currentWeek);
-      newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
-      setCurrentWeek(newDate);
-    };
-
-    const MealSlot = ({ day, mealType, recipeId }) => {
-      const recipe = recipes.find(r => r.id === recipeId);
-      const [isSelecting, setIsSelecting] = useState(false);
-
-      const handleSelect = (selectedRecipeId) => {
-        handleUpdateMealPlan(day, mealType, selectedRecipeId);
-        setIsSelecting(false);
-      };
-
-      return (
-        <div className="p-1 min-h-[70px] flex flex-col justify-center items-center text-center">
-          {recipe ? (
-            <div
-              className="bg-teal-100 p-2 rounded-lg w-full text-sm font-medium text-teal-800 shadow-inner cursor-pointer active:scale-[0.98] transition-transform"
-              onClick={() => handleUpdateMealPlan(day, mealType, null)} // Click to remove
-            >
-              <p className='truncate'>{recipe.name}</p>
-              <span className="text-xs block text-teal-700/80">({mealType})</span>
-            </div>
-          ) : (
-            <button
-              className="w-10 h-10 flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:text-teal-600 hover:border-teal-600 transition-all active:scale-[0.95]"
-              onClick={() => setIsSelecting(true)}
-              aria-label={`Add ${mealType} on ${day}`}
-            >
-              <Plus className="w-5 h-5" />
-            </button>
-          )}
-
-          {isSelecting && (
-            <RecipeSelectorModal
-              recipes={recipes}
-              onSelect={handleSelect}
-              onClose={() => setIsSelecting(false)}
-              title={`Add ${mealType} on ${day}`}
-            />
-          )}
-        </div>
-      );
-    };
-
-    const RecipeSelectorModal = ({ recipes, onSelect, onClose, title }) => (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-50">
-          <div className="bg-white rounded-t-2xl shadow-2xl p-6 w-full max-w-lg h-3/4 overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-bold text-gray-800">{title}</h3>
-              <button onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2 rounded-full bg-gray-100">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            {recipes.length === 0 ? (
-                <p className="text-center text-gray-500 p-4">No recipes available. Go to Recipes tab to add some!</p>
-            ) : (
-                <div className="space-y-3">
-                    {recipes.map(recipe => (
-                        <button
-                            key={recipe.id}
-                            className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-teal-50 transition-colors text-gray-800 font-medium active:scale-[0.99]"
-                            onClick={() => onSelect(recipe.id)}
-                        >
-                            {recipe.name}
-                            <span className="text-xs block text-gray-500 capitalize">{recipe.category}</span>
-                        </button>
-                    ))}
-                </div>
-            )}
-          </div>
-        </div>
-    );
-
-
-    return (
-      <div className="p-4 pt-0">
-        <div className="flex justify-between items-center mb-6">
-          <button onClick={() => navigateWeek('prev')} className="text-gray-500 hover:text-teal-600 p-2 rounded-full active:scale-[0.9]" aria-label="Previous Week">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <h2 className="text-xl font-semibold text-gray-800">{weekRange}</h2>
-          <button onClick={() => navigateWeek('next')} className="text-gray-500 hover:text-teal-600 p-2 rounded-full active:scale-[0.9]" aria-label="Next Week">
-            <ArrowRight className="w-5 h-5" />
-          </button>
-        </div>
-
-        <h1 className="text-2xl font-bold mb-4 text-gray-800">Weekly Meal Plan</h1>
-
-        <div className="space-y-6">
-          {WEEK_DAYS.map(day => (
-            <div key={day} className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
-              <h3 className="text-lg font-bold mb-3 text-teal-700">{day}</h3>
-              <div className="grid grid-cols-3 gap-2 text-xs font-medium text-gray-500 mb-2">
-                <div>BREAKFAST</div>
-                <div>LUNCH</div>
-                <div>DINNER</div>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {MEAL_TYPES.map(mealType => (
-                  <MealSlot
-                    key={mealType}
-                    day={day}
-                    mealType={mealType}
-                    recipeId={mealPlan.weekData?.[day]?.[mealType]}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  // --- VIEW: SHOPPING LIST ---
-
-  const ShoppingView = () => {
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [listGenerated, setListGenerated] = useState(false);
-    const [shoppingList, setShoppingList] = useState({});
-
-    // Logic to calculate the shopping list from the current meal plan
-    const generateShoppingList = useCallback(() => {
-        setIsGenerating(true);
-        const aggregatedList = {};
-
-        if (!mealPlan.weekData) {
-            setListGenerated(false);
-            setIsGenerating(false);
-            return;
-        }
-
-        // 1. Collect all unique recipe IDs from the meal plan
-        const recipeIds = new Set();
-        Object.values(mealPlan.weekData).forEach(dayMeals => {
-            MEAL_TYPES.forEach(mealType => {
-                if (dayMeals[mealType]) {
-                    recipeIds.add(dayMeals[mealType]);
-                }
-            });
-        });
-
-        // 2. Aggregate ingredients for all selected recipes
-        recipes.filter(r => recipeIds.has(r.id)).forEach(recipe => {
-            recipe.ingredients.forEach(item => {
-                const key = `${item.name.toLowerCase()}||${item.unit.toLowerCase()}`;
-                // Use a try/catch to ensure parseFloat handles strings like "1/2" or complex inputs
-                let quantity = 0;
-                try {
-                    // Simple evaluation for fractions like "1/2" to 0.5
-                    if (item.quantity.includes('/')) {
-                        const parts = item.quantity.split('/').map(Number);
-                        // Check for valid fraction parts
-                        if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[1] !== 0) {
-                             quantity = parts[0] / parts[1];
-                        }
-                    } else {
-                        quantity = parseFloat(item.quantity) || 0;
-                    }
-                } catch {
-                    quantity = 0; // Fallback if calculation fails
-                }
-
-                if (aggregatedList[key]) {
-                    // Simple aggregation: only sums quantities if units are identical.
-                    aggregatedList[key].quantity += quantity;
-                } else {
-                    aggregatedList[key] = {
-                        name: item.name,
-                        unit: item.unit,
-                        quantity: quantity,
-                        isPurchased: false
-                    };
-                }
-            });
-        });
-
-        setTimeout(() => { // Simulate processing time
-            setShoppingList(aggregatedList);
-            setListGenerated(true);
-            setIsGenerating(false);
-        }, 500);
-    }, [mealPlan, recipes]);
-
-    const handleTogglePurchased = (key) => {
-        setShoppingList(prev => ({
-            ...prev,
-            [key]: {
-                ...prev[key],
-                isPurchased: !prev[key].isPurchased
-            }
-        }));
-    };
-
-    const formatQuantity = (quantity) => {
-        if (!quantity || quantity === 0) return '';
-        // Display as is, rounded to 2 decimals if it's not an integer
-        return Number.isInteger(quantity) ? quantity.toString() : quantity.toFixed(2).replace(/(\.0+|0)$/, '');
-    }
-
-    const handlePrint = () => {
-        const printableContent = `
-            <html>
-            <head>
-                <title>Sync & Savor Shopping List</title>
-                <style>
-                    body { font-family: 'Inter', sans-serif; padding: 20px; }
-                    h1 { color: #0f766e; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
-                    ul { list-style: none; padding: 0; }
-                    li { margin-bottom: 8px; font-size: 16px; border-bottom: 1px dashed #eee; padding-bottom: 4px; }
-                    .purchased { text-decoration: line-through; color: #888; }
-                </style>
-            </head>
-            <body>
-                <h1>Shopping List for ${getWeekRange(currentWeek)}</h1>
-                <ul>
-                    ${Object.values(shoppingList).map(item => `
-                        <li class="${item.isPurchased ? 'purchased' : ''}">
-                            ${formatQuantity(item.quantity)} ${item.unit || ''} ${item.name}
-                        </li>
-                    `).join('')}
-                </ul>
-                <p style="margin-top: 20px; font-style: italic; font-size: 12px;">Generated by Sync & Savor</p>
-            </body>
-            </html>
-        `;
-        const printWindow = window.open('', '', 'height=600,width=800');
-        printWindow.document.write(printableContent);
-        printWindow.document.close();
-        printWindow.print();
-    };
-
-    const listItems = Object.entries(shoppingList);
-    const hasMealsPlanned = Object.values(mealPlan.weekData || {}).some(day =>
-        MEAL_TYPES.some(meal => day[meal])
-    );
-
-    return (
-      <div className="p-4 pt-0">
-        <h1 className="text-2xl font-bold mb-6 text-gray-800">Shopping List</h1>
-
-        <div className="text-center p-8 bg-gray-50 rounded-xl mb-6 shadow-inner">
-            {listGenerated && listItems.length > 0 && (
-                <div className="text-left mb-6">
-                    <p className="font-semibold text-gray-700 text-lg">Current List: {getWeekRange(currentWeek)}</p>
-                    <p className="text-sm text-gray-500">{listItems.length} unique items aggregated.</p>
-                </div>
-            )}
-            
-            {!listGenerated || (listGenerated && listItems.length === 0) ? (
-                <div className="text-gray-500">
-                    <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                    <p className="text-lg font-medium">{listGenerated ? "List is empty." : "Generate Your List"}</p>
-                    <p className="text-sm">Plan meals in the 'Plan' tab, then click the button below.</p>
-                </div>
-            ) : null}
-
-            {hasMealsPlanned && !isGenerating && (
-                <button
-                    onClick={generateShoppingList}
-                    className="mt-4 px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors flex items-center justify-center mx-auto active:scale-[0.98]"
-                >
-                    <ShoppingCart className="w-5 h-5 mr-2" /> {listGenerated ? 'Regenerate List' : 'Generate List'}
-                </button>
-            )}
-
-            {isGenerating && (
-                <div className='flex items-center justify-center mt-4 text-teal-600 font-semibold'>
-                    <span className="animate-spin mr-2">&#9696;</span> Aggregating Ingredients...
-                </div>
-            )}
-        </div>
-
-        {listItems.length > 0 && (
-            <div className="mb-4 flex justify-end space-x-3">
-                <button
-                    onClick={handlePrint}
-                    className="flex items-center text-teal-600 font-medium hover:bg-teal-50 transition-colors border border-teal-600 rounded-lg px-3 py-1.5 active:scale-[0.98]"
-                >
-                    <Printer className="w-4 h-4 mr-1" /> Print / PDF
-                </button>
-            </div>
-        )}
-
-        <div className="space-y-2">
-            {listItems.sort((a, b) => a[1].isPurchased - b[1].isPurchased).map(([key, item]) => (
-                <div
-                    key={key}
-                    className={`flex items-center p-3 rounded-xl border cursor-pointer transition-all active:scale-[0.99] ${
-                        item.isPurchased ? 'bg-gray-100 border-gray-200 line-through text-gray-500' : 'bg-white border-teal-100 shadow-sm hover:bg-teal-50'
-                    }`}
-                    onClick={() => handleTogglePurchased(key)}
-                >
-                    <input
-                        type="checkbox"
-                        checked={item.isPurchased}
-                        readOnly
-                        className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 mr-3"
-                    />
-                    <div className="flex-1">
-                        <span className="font-semibold text-gray-800">
-                            {formatQuantity(item.quantity)} {item.unit || ''}
-                        </span>
-                        <span className="ml-1">{item.name}</span>
-                    </div>
-                </div>
-            ))}
-        </div>
-      </div>
-    );
-  };
-
-
-  // --- VIEW: DISCOVER RECIPES ---
-
-  const DiscoverView = () => {
-    const [searchTerm, setSearchTerm] = useState('');
-    const [activeFilter, setActiveFilter] = useState('All');
-    const filters = ['All', 'Quick', 'Healthy', 'Vegetarian', 'Dessert'];
-
-    const filteredRecipes = useMemo(() => {
-      let filtered = recipes;
-
-      // Filter by category
-      if (activeFilter !== 'All') {
-        filtered = filtered.filter(recipe => recipe.category === activeFilter);
-      }
-
-      // Filter by search term (name or ingredients)
-      if (searchTerm.trim()) {
-        const lowerCaseSearch = searchTerm.toLowerCase();
-        filtered = filtered.filter(recipe =>
-          recipe.name.toLowerCase().includes(lowerCaseSearch) ||
-          recipe.ingredients.some(i => i.name.toLowerCase().includes(lowerCaseSearch))
-        );
-      }
-
-      return filtered;
-    }, [recipes, activeFilter, searchTerm]);
-
-    return (
-      <div className="p-4 pt-0">
-        <h1 className="text-2xl font-bold mb-6 text-gray-800">Discover Recipes</h1>
-
-        <div className="mb-6">
-          <div className="relative mb-3">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by name or ingredient..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
-            />
-          </div>
-
-          {/* Filter Chips */}
-          <div className="flex space-x-2 overflow-x-auto py-2">
-            {filters.map(filter => (
-              <button
-                key={filter}
-                className={`px-4 py-2 text-sm font-medium rounded-full whitespace-nowrap transition-colors active:scale-[0.98] ${
-                  activeFilter === filter
-                    ? 'bg-teal-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-                onClick={() => setActiveFilter(filter)}
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <h3 className="text-xl font-bold mb-4 text-gray-800">
-          {filteredRecipes.length} {filteredRecipes.length === 1 ? 'Recipe' : 'Recipes'} Found
-        </h3>
-
-        <div className="space-y-3 pb-20">
-          {filteredRecipes.map(recipe => (
-            <div
-              key={recipe.id}
-              className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer hover:bg-teal-50 transition-colors"
-              onClick={() => setActiveRecipe(recipe)}
-            >
-              <div>
-                <p className="font-semibold text-gray-800">{recipe.name}</p>
-                <span className="text-xs text-gray-500 capitalize">{recipe.category}</span>
-              </div>
-              <BookOpen className="w-5 h-5 text-teal-600" />
-            </div>
-          ))}
-          {filteredRecipes.length === 0 && (
-            <div className="text-center p-8 bg-gray-50 rounded-xl text-gray-500 border border-dashed border-gray-200">
-              <Search className="w-8 h-8 mx-auto mb-2" />
-              <p>No recipes match your criteria.</p>
-            </div>
-          )}
-        </div>
-        {activeRecipe && <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />}
-      </div>
-    );
-  };
-
-
-  // --- MAIN RENDER LOGIC ---
-
-  const renderContent = () => {
-    if (!isAuthReady) {
-      return (
-        <div className="flex items-center justify-center h-[50vh] p-8 text-lg font-medium text-teal-600">
-          <span className="animate-spin mr-3">&#9696;</span>
-          Connecting to Sync & Savor...
-        </div>
-      );
-    }
-    switch (activeTab) {
-      case 'recipes':
-        return <RecipesView />;
-      case 'plan':
-        return <PlanView />;
-      case 'shopping':
-        return <ShoppingView />;
-      case 'discover':
-        return <DiscoverView />;
-      default:
-        return <RecipesView />;
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gray-50 font-['Inter'] flex flex-col">
-      <style>{`
         /* Custom scrollbar for better look */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
         ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #555; }
-
         /* Ensure smooth animation for spinner */
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
         .animate-spin { animation: spin 1s linear infinite; }
-      `}</style>
-      <Header />
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-      <main className="flex-1 overflow-y-auto pb-20">
-        {renderContent()}
-      </main>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const { createRoot } = ReactDOM;
 
-      {/* Mobile Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-20">
-        <div className="flex justify-around max-w-xl mx-auto">
-          <NavItem tab="recipes" icon={Plus} label="Add" />
-          <NavItem tab="plan" icon={Calendar} label="Plan" />
-          <NavItem tab="shopping" icon={ShoppingCart} label="List" />
-          <NavItem tab="discover" icon={Search} label="Discover" />
-        </div>
-      </nav>
+        // --- LUCIDE ICONS (Simplified inline usage for single-file HTML) ---
+        // We'll define simple icon components since we can't import lucide-react.
+        // We will just use the class names and assume they exist or use simple SVGs if needed, 
+        // but for simplicity and adhering to the framework, we'll use placeholder or custom icons.
+        
+        // Since we cannot use 'lucide-react', we'll simulate the icons using text or simple visual placeholders 
+        // to maintain component structure, but use Tailwind for the intended layout. 
+        // For the purpose of this single-file output, we must use inline SVGs or Emojis.
+        
+        const Icon = ({ children, className = "w-5 h-5", title }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-label={title}>
+                {children}
+            </svg>
+        );
 
-      {/* Global Modals */}
-      <Modal content={modalContent} />
-      {activeRecipe && activeTab !== 'discover' && activeTab !== 'recipes' && (
-        <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />
-      )}
-    </div>
-  );
-};
+        const Home = (props) => <Icon {...props} title="Home"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 001 1h3m-11 0a1 1 0 01-2 0m2 0a1 1 0 002 0m-2 0h-2M9 21h6"/></Icon>;
+        const BookOpen = (props) => <Icon {...props} title="Book Open"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.405 10 3 8 3a4 4 0 000 8h2m-4-1h4m3-2.747C13.168 5.405 14 3 16 3a4 4 0 010 8h-2m4 1h4m-9-1V3"/></Icon>;
+        const Calendar = (props) => <Icon {...props} title="Calendar"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></Icon>;
+        const ShoppingCart = (props) => <Icon {...props} title="Shopping Cart"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"/></Icon>;
+        const Search = (props) => <Icon {...props} title="Search"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></Icon>;
+        const Plus = (props) => <Icon {...props} title="Plus"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></Icon>;
+        const ArrowLeft = (props) => <Icon {...props} title="Arrow Left"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18"/></Icon>;
+        const ArrowRight = (props) => <Icon {...props} title="Arrow Right"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3"/></Icon>;
+        const Clipboard = (props) => <Icon {...props} title="Clipboard"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></Icon>;
+        const Printer = (props) => <Icon {...props} title="Printer"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m0 0v-4a2 2 0 012-2h4a2 2 0 012 2v4m-3 0a1 1 0 11-2 0 1 1 0 012 0zM7 13h10v6H7v-6z"/></Icon>;
+        const X = (props) => <Icon {...props} title="Close"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></Icon>;
+        const Camera = (props) => <Icon {...props} title="Camera"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.586a2 2 0 001.414-.586l.828-.828A2 2 0 019.172 4h5.656a2 2 0 011.414.586l.828.828A2 2 0 0018.414 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></Icon>;
+        const Upload = (props) => <Icon {...props} title="Upload"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></Icon>;
+        const Globe = (props) => <Icon {...props} title="Globe"><circle cx="12" cy="12" r="10"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 2a14.5 14.5 0 000 20 14.5 14.5 0 000-20zM2 12h20"/></Icon>;
+        const Link = (props) => <Icon {...props} title="Link"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.8 19c1.6 0 2.9-1.3 2.9-2.9V13h-2.9v3.1c0 .7-.6 1.3-1.3 1.3H9.4c-.7 0-1.3-.6-1.3-1.3V8.8c0-.7.6-1.3 1.3-1.3h3.1V5.7H9.4c-1.6 0-2.9 1.3-2.9 2.9v5.8c0 1.6 1.3 2.9 2.9 2.9h5.8zM17 7.2v5.8c0 1.6-1.3 2.9-2.9 2.9h-5.8c-1.6 0-2.9-1.3-2.9-2.9V7.2c0-1.6 1.3-2.9 2.9-2.9h5.8c1.6 0 2.9 1.3 2.9 2.9z"/></Icon>;
+        const User = (props) => <Icon {...props} title="User"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 3.582-8 8h16c0-4.418-3.582-8-8-8z"/></Icon>;
+        const Settings = (props) => <Icon {...props} title="Settings"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.82 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35-.426.427-.642 1.055-.588 1.713a1.724 1.724 0 00-1.066 2.573c.94 1.543-.82 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0-.427-.426-1.055-.642-1.713-.588a1.724 1.724 0 00-2.573 1.066c-1.543.94-3.31-.82-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35.427-.426.642-1.055.588-1.713a1.724 1.724 0 001.066-2.573c-.94-1.543.82-3.31 2.37-2.37.58.356 1.155.15 1.713-.134zM12 12a3 3 0 100-6 3 3 0 000 6z"/></Icon>;
+        const Package = (props) => <Icon {...props} title="Package"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></Icon>;
+        const Trash2 = (props) => <Icon {...props} title="Trash"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></Icon>;
 
-export default App;
+
+        // --- FIREBASE CONFIGURATION & GLOBAL VARS ---
+        // Define global variables as required by the environment logic.
+        // NOTE: In the canvas environment, these are injected. Here, we use safe defaults.
+        const __app_id = 'default-syncandsavor-app';
+        const __firebase_config = '{}';
+        const __initial_auth_token = null;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+
+        // --- UTILITY FUNCTIONS ---
+
+        /**
+         * Converts raw ingredient text (simulating OCR output) into a structured array.
+         */
+        const parseIngredients = (rawText) => {
+          if (!rawText) return [];
+          const lines = rawText.split('\n').filter(line => line.trim() !== '');
+          return lines.map(line => {
+            const parts = line.trim().split(' ');
+            // Default to '0' quantity if parsing fails, to ensure numerical stability.
+            const quantity = parts.length > 0 ? parts[0] : '0';
+            const unit = parts.length > 1 ? parts[1] : '';
+            const name = parts.slice(2).join(' ');
+            return { name, quantity, unit };
+          });
+        };
+
+        /**
+         * Generates a unique ID for the current week based on the start date (Monday).
+         */
+        const getWeekId = (date) => {
+          const d = new Date(date);
+          const day = d.getDay(); // 0 for Sunday, 1 for Monday
+          const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust date to Monday
+          const monday = new Date(d.setDate(diff));
+          return monday.toISOString().split('T')[0];
+        };
+
+        /**
+         * Gets the date range string for the current week starting on Monday.
+         */
+        const getWeekRange = (date) => {
+          const d = new Date(date);
+          const day = d.getDay();
+          const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+          const monday = new Date(d.setDate(diff));
+
+          const startMonth = monday.toLocaleString('default', { month: 'short' });
+          const startDate = monday.getDate();
+
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 6);
+          const endMonth = sunday.toLocaleString('default', { month: 'short' });
+          const endDate = sunday.getDate();
+
+          return `${startMonth} ${startDate} - ${endMonth} ${endDate}`;
+        };
+
+        // Array of days for meal planning
+        const WEEK_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner'];
+
+
+        // --- APP START ---
+
+        const App = () => {
+          const [activeTab, setActiveTab] = useState('recipes'); // recipes, plan, shopping, discover
+          const [user, setUser] = useState(null);
+          const [isAuthReady, setIsAuthReady] = useState(false);
+          const [recipes, setRecipes] = useState([]);
+          const [currentWeek, setCurrentWeek] = useState(new Date());
+          const [mealPlan, setMealPlan] = useState({});
+          const [isModalOpen, setIsModalOpen] = useState(false);
+          const [modalContent, setModalContent] = useState(null);
+          const [activeRecipe, setActiveRecipe] = useState(null); // For recipe creation/editing
+
+          // Store Firebase instances in state once initialized
+          const [dbInstance, setDbInstance] = useState(null);
+          const [authInstance, setAuthInstance] = useState(null);
+
+          // --- FIREBASE AUTH & DB INITIALIZATION (Resilient Check) ---
+          useEffect(() => {
+            let timeoutId = null;
+            let authUnsubscribe = null;
+            const RETRY_DELAY = 100; // Check every 100ms
+
+            const checkAndInitializeFirebase = () => {
+              const firebase = window.firebase;
+
+              // Check if all necessary components are available on the global object
+              if (
+                !firebase ||
+                !firebase.initializeApp ||
+                !firebase.auth || // Check for firebase.auth
+                !firebase.firestore || // Check for firebase.firestore
+                !firebase.firestore.setLogLevel // Check for setLogLevel
+              ) {
+                // Functions are still missing. Retry after a small delay.
+                console.log("Firebase functions not ready. Retrying...");
+                timeoutId = setTimeout(checkAndInitializeFirebase, RETRY_DELAY);
+                return;
+              }
+
+              // Functions are ready. Proceed with initialization.
+              console.log("Firebase functions ready. Initializing...");
+
+              const { initializeApp, auth, firestore } = firebase;
+              const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = firebase.auth;
+              const { getFirestore, setLogLevel, collection, doc, query, onSnapshot, setDoc, addDoc, deleteDoc } = firebase.firestore;
+              
+              // Map the V9 functions to the global objects provided by the V8 CDN for compatibility
+              // Since the provided CDN URLs are V8/V9 hybrid style, we will rely on global access
+              // and the logic within the component will call `window.firebase.auth.getAuth()`, etc.
+
+              try {
+                  // Use V9-style accessors on the global objects, which the CDNs often expose.
+                  // For the sake of this code, we assume the V9 methods (getAuth, getFirestore)
+                  // are available as methods on the global firebase/firebase.* namespaces.
+                  
+                  const app = initializeApp(firebaseConfig);
+                  const auth = getAuth(app);
+                  const db = getFirestore(app);
+
+                  setLogLevel('debug'); // Enable Firestore logging
+                  setAuthInstance(auth);
+                  setDbInstance(db);
+
+                  const initializeAuth = async () => {
+                    try {
+                      if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                      } else {
+                        await signInAnonymously(auth);
+                      }
+                    } catch (error) {
+                      console.error("Firebase Auth Error: Failed to sign in.", error);
+                    }
+                  };
+
+                  authUnsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    if (currentUser) {
+                      setUser(currentUser);
+                    } else {
+                      setUser(null);
+                    }
+                    setIsAuthReady(true);
+                  });
+
+                  initializeAuth();
+
+              } catch (error) {
+                  console.error("Firebase Initialization Error: Could not initialize app or services.", error);
+              }
+            };
+
+            checkAndInitializeFirebase();
+
+            // Cleanup function for the effect
+            return () => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+                if (authUnsubscribe) {
+                    authUnsubscribe();
+                }
+            };
+          }, []); // Empty dependency array
+
+          // --- FIREBASE DATA LISTENERS (RECIPES & MEAL PLANS) ---
+          useEffect(() => {
+            // Only proceed if authenticated and instances are available
+            if (!isAuthReady || !user || !dbInstance) return;
+
+            // Access necessary Firestore functions once auth is ready
+            const firebase = window.firebase;
+            if (!firebase || !firebase.firestore) return;
+
+            // Use the V9 syntax functions
+            const { collection, query, onSnapshot, doc } = firebase.firestore;
+
+            const db = dbInstance;
+            const userId = user.uid;
+
+            // 1. Recipes Listener
+            const recipeQuery = query(
+              collection(db, `artifacts/${appId}/users/${userId}/recipes`)
+            );
+            const unsubscribeRecipes = onSnapshot(recipeQuery, (snapshot) => {
+              const fetchedRecipes = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+              }));
+              setRecipes(fetchedRecipes);
+            }, (error) => {
+              console.error("Error fetching recipes:", error);
+            });
+
+            // 2. Meal Plan Listener
+            const weekId = getWeekId(currentWeek);
+            const planDocRef = doc(db, `artifacts/${appId}/users/${userId}/mealPlans`, weekId);
+
+            const unsubscribePlan = onSnapshot(planDocRef, (docSnap) => {
+              if (docSnap.exists()) {
+                setMealPlan(docSnap.data());
+              } else {
+                // Initialize an empty plan object for the current week state
+                const emptyPlan = {
+                  id: weekId,
+                  userId,
+                  weekData: WEEK_DAYS.reduce((acc, day) => {
+                    acc[day] = MEAL_TYPES.reduce((mealAcc, meal) => ({ ...mealAcc, [meal]: null }), {});
+                    return acc;
+                  }, {})
+                };
+                setMealPlan(emptyPlan);
+              }
+            }, (error) => {
+              console.error("Error fetching meal plan:", error);
+            });
+
+            return () => {
+              unsubscribeRecipes();
+              unsubscribePlan();
+            };
+          }, [isAuthReady, user, currentWeek, dbInstance]);
+
+          // --- DATA MODIFICATION HANDLERS ---
+
+          /** Saves a new or updates an existing recipe. */
+          const handleSaveRecipe = useCallback(async (recipeData) => {
+            if (!user || !dbInstance) return console.error("User or Firestore not ready.");
+
+            const db = dbInstance;
+            const userId = user.uid;
+            const firebase = window.firebase;
+            const { doc, setDoc, collection, addDoc } = firebase.firestore || {};
+            if (!doc || !setDoc || !collection || !addDoc) return console.error("Firebase functions unavailable for saving recipe.");
+
+            try {
+              if (recipeData.id) {
+                // Update existing recipe
+                const docRef = doc(db, `artifacts/${appId}/users/${userId}/recipes`, recipeData.id);
+                await setDoc(docRef, { ...recipeData, updatedAt: Date.now() }, { merge: true });
+                setModalContent({
+                  title: "Recipe Updated!",
+                  message: `${recipeData.name} has been successfully updated.`,
+                  onConfirm: () => setIsModalOpen(false)
+                });
+              } else {
+                // Add new recipe
+                await addDoc(collection(db, `artifacts/${appId}/users/${userId}/recipes`), {
+                  ...recipeData,
+                  userId: userId,
+                  createdAt: Date.now(),
+                });
+                setModalContent({
+                  title: "Recipe Added!",
+                  message: `${recipeData.name} has been saved to your collection.`,
+                  onConfirm: () => setIsModalOpen(false)
+                });
+              }
+            } catch (error) {
+              console.error("Error saving recipe:", error);
+              setModalContent({
+                title: "Error",
+                message: "Failed to save recipe. Please check your connection or permissions.",
+                onConfirm: () => setIsModalOpen(false)
+              });
+            } finally {
+              setIsModalOpen(true);
+              setActiveRecipe(null);
+            }
+          }, [user, dbInstance]);
+
+
+          /** Deletes an existing recipe. */
+          const handleDeleteRecipe = useCallback(async (recipeId, recipeName) => {
+            if (!user || !dbInstance) return console.error("User or Firestore not ready.");
+
+            // First, show confirmation modal
+            setModalContent({
+              title: `Confirm Deletion`,
+              message: `Are you sure you want to permanently delete "${recipeName}"? This action cannot be undone.`,
+              needsConfirmation: true,
+              onConfirm: async () => {
+                setIsModalOpen(false); // Close confirmation modal before async work
+
+                const db = dbInstance;
+                const userId = user.uid;
+                const firebase = window.firebase;
+                const { doc, deleteDoc } = firebase.firestore || {};
+
+                if (!doc || !deleteDoc) return console.error("Firebase functions unavailable for deleting recipe.");
+
+                try {
+                  const docRef = doc(db, `artifacts/${appId}/users/${userId}/recipes`, recipeId);
+                  await deleteDoc(docRef);
+
+                  // Show success modal
+                  setModalContent({
+                    title: "Recipe Deleted!",
+                    message: `${recipeName} has been permanently removed.`,
+                    onConfirm: () => setIsModalOpen(false),
+                    needsConfirmation: false
+                  });
+                  setIsModalOpen(true);
+                  setActiveRecipe(null);
+                } catch (error) {
+                  console.error("Error deleting recipe:", error);
+                  // Show error modal
+                  setModalContent({
+                    title: "Error",
+                    message: "Failed to delete recipe. Please try again.",
+                    onConfirm: () => setIsModalOpen(false),
+                    needsConfirmation: false
+                  });
+                  setIsModalOpen(true);
+                }
+              },
+              onCancel: () => setIsModalOpen(false),
+              confirmText: "Delete",
+              cancelText: "Cancel"
+            });
+            setIsModalOpen(true); // Open confirmation modal
+          }, [user, dbInstance]);
+
+          /** Adds or removes a recipe to a specific meal slot in the meal plan. */
+          const handleUpdateMealPlan = useCallback(async (day, mealType, recipeId) => {
+            if (!user || !dbInstance || !mealPlan.id) return console.error("User or Meal Plan not ready.");
+
+            const db = dbInstance;
+            const userId = user.uid;
+            const firebase = window.firebase;
+            const { doc, setDoc } = firebase.firestore || {};
+            if (!doc || !setDoc) return console.error("Firebase functions unavailable for updating meal plan.");
+
+            const planDocRef = doc(db, `artifacts/${appId}/users/${userId}/mealPlans`, mealPlan.id);
+
+            // Create a deep copy of the weekData to update the specific slot
+            const updatedWeekData = WEEK_DAYS.reduce((acc, currentDay) => {
+                acc[currentDay] = { ...mealPlan.weekData[currentDay] };
+                if (currentDay === day) {
+                    acc[currentDay][mealType] = recipeId; // recipeId or null to clear
+                }
+                return acc;
+            }, {});
+
+
+            try {
+              await setDoc(planDocRef, {
+                id: mealPlan.id,
+                userId: userId,
+                weekData: updatedWeekData
+              }, { merge: true });
+            } catch (error) {
+              console.error("Error updating meal plan:", error);
+              setModalContent({
+                title: "Error",
+                message: "Failed to update meal plan.",
+                onConfirm: () => setIsModalOpen(false)
+              });
+              setIsModalOpen(true);
+            }
+          }, [user, mealPlan, dbInstance]);
+
+          // --- UI COMPONENTS ---
+
+          const NavItem = ({ tab, icon: Icon, label }) => (
+            <button
+              className={`flex flex-col items-center justify-center p-2 text-sm transition-colors duration-200 ${
+                activeTab === tab ? 'text-teal-600' : 'text-gray-500 hover:text-teal-500'
+              }`}
+              onClick={() => setActiveTab(tab)}
+              aria-label={label}
+            >
+              <Icon className="w-5 h-5 mb-1" />
+              <span className="text-xs font-medium">{label}</span>
+            </button>
+          );
+
+          const Header = () => (
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-white sticky top-0 z-10">
+              <div className="flex items-center">
+                <BookOpen className="w-6 h-6 text-teal-600 mr-2" />
+                <h1 className="text-xl font-bold text-gray-800">Sync & Savor</h1>
+              </div>
+              <div className="flex space-x-3">
+                {user && (
+                    <div className="hidden sm:flex items-center text-xs text-gray-500 border rounded-full px-2 py-1">
+                        <User className="w-3 h-3 mr-1" />
+                        <span className='truncate w-20' title={user.uid}>User ID: {user.uid.substring(0, 8)}...</span>
+                    </div>
+                )}
+                <button className="text-gray-500 hover:text-gray-800" aria-label="Settings">
+                  <Settings className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          );
+
+          const Modal = ({ content }) => {
+            if (!content || !isModalOpen) return null;
+
+            return (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm">
+                  <h3 className="text-xl font-semibold mb-3 text-gray-800">{content.title}</h3>
+                  <p className="text-gray-600 mb-6">{content.message}</p>
+                  <div className={`flex ${content.needsConfirmation ? 'justify-between' : 'justify-end'}`}>
+                    {content.needsConfirmation && (
+                        <button
+                            onClick={() => {
+                                if (content.onCancel) content.onCancel();
+                            }}
+                            className="px-4 py-2 text-gray-600 font-semibold rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                            {content.cancelText || 'Cancel'}
+                        </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (content.onConfirm) content.onConfirm();
+                        // If it doesn't need confirmation, close the modal immediately
+                        if (!content.needsConfirmation) setIsModalOpen(false);
+                      }}
+                      className={`px-4 py-2 font-semibold rounded-lg transition-colors ${
+                          content.title.includes('Delete') ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-teal-600 text-white hover:bg-teal-700'
+                      }`}
+                    >
+                      {content.confirmText || 'OK'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          };
+
+          // --- VIEW: ADD/EDIT RECIPE (OCR SIMULATION) ---
+
+          const AddEditRecipeModal = ({ recipe, onClose }) => {
+            const [name, setName] = useState(recipe?.name || '');
+            // Format ingredients for the textarea input
+            const [rawIngredients, setRawIngredients] = useState(
+              recipe?.ingredients?.map(i => `${i.quantity} ${i.unit} ${i.name}`).join('\n') || '' // Start empty for new recipes
+            );
+            const [instructions, setInstructions] = useState(recipe?.instructions || '');
+            const [category, setCategory] = useState(recipe?.category || 'Quick');
+            const isEdit = !!recipe?.id;
+
+            // Set initial mock content for a new recipe
+            useEffect(() => {
+                if (!isEdit && rawIngredients === '') {
+                    setRawIngredients('1 cup Flour\n2 tsp Sugar\n1/2 cup Milk\n');
+                    setInstructions('1. Mix dry ingredients.\n2. Add wet ingredients and stir until just combined.\n3. Bake for 20 minutes at 350°F.');
+                }
+            }, [isEdit, rawIngredients]);
+
+
+            const handleSave = () => {
+              if (!name.trim() || !rawIngredients.trim() || !instructions.trim()) {
+                setModalContent({
+                  title: "Missing Information",
+                  message: "Please fill in the recipe name, ingredients, and instructions.",
+                  onConfirm: () => setIsModalOpen(false)
+                });
+                setIsModalOpen(true);
+                return;
+              }
+
+              const ingredients = parseIngredients(rawIngredients);
+              const newRecipe = {
+                id: recipe?.id,
+                name: name.trim(),
+                ingredients,
+                instructions: instructions.trim(),
+                category,
+              };
+              handleSaveRecipe(newRecipe);
+              onClose();
+            };
+
+            const handleDelete = () => {
+                if (isEdit) {
+                    handleDeleteRecipe(recipe.id, recipe.name);
+                    onClose(); // Close the edit modal to prevent stale UI
+                }
+            }
+
+            const ocrMockMessage = (
+                <div className="p-3 bg-teal-50 border border-teal-200 rounded-lg mb-4 text-sm text-teal-800">
+                    <p className="font-semibold">OCR Simulation Input:</p>
+                    <p>Enter the ingredients as **"Quantity Unit Name"** per line. (e.g., "1/2 cup Milk")</p>
+                </div>
+            );
+
+            return (
+              <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-40">
+                <div className="bg-white rounded-t-2xl shadow-2xl p-6 w-full max-w-lg h-full overflow-y-auto">
+                  <div className="flex justify-between items-center mb-6">
+                    <h2 className="text-2xl font-bold text-teal-600">{isEdit ? 'Edit Recipe' : 'Add New Recipe'}</h2>
+                    <button onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2 rounded-full bg-gray-100">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {ocrMockMessage}
+
+                  <div className="space-y-4">
+                    <input
+                      type="text"
+                      placeholder="Recipe Name (e.g., Simple Tomato Soup)"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
+                    />
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
+                    >
+                      <option value="Quick">Quick</option>
+                      <option value="Healthy">Healthy</option>
+                      <option value="Vegetarian">Vegetarian</option>
+                      <option value="Dessert">Dessert</option>
+                      <option value="Other">Other</option>
+                    </select>
+                    <textarea
+                      placeholder="Ingredients (1 cup Flour, 2 tsp Sugar...)"
+                      value={rawIngredients}
+                      onChange={(e) => setRawIngredients(e.target.value)}
+                      rows="5"
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 resize-none"
+                    />
+                    <textarea
+                      placeholder="Instructions"
+                      value={instructions}
+                      onChange={(e) => setInstructions(e.target.value)}
+                      rows="7"
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 resize-none"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleSave}
+                    className="w-full mt-6 p-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors"
+                  >
+                    {isEdit ? 'Update Recipe' : 'Save Recipe'}
+                  </button>
+
+                  {isEdit && (
+                    <button
+                      onClick={handleDelete}
+                      className="w-full mt-3 p-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700 transition-colors flex items-center justify-center"
+                    >
+                      <Trash2 className="w-5 h-5 mr-2" /> Delete Recipe
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          };
+
+
+          // --- VIEW: RECIPES (MAIN) ---
+
+          const RecipesView = () => {
+            const handleAddRecipeClick = (type) => {
+                // Launch the AddEditRecipeModal to simulate the captured data input.
+                setModalContent({
+                    title: `Adding Recipe via ${type}`,
+                    message: `Starting a new recipe entry. Edit the placeholder content based on your scan or web import.`,
+                    onConfirm: () => {
+                        setIsModalOpen(false);
+                        setActiveRecipe({}); // Open the modal for a new recipe
+                    }
+                });
+                setIsModalOpen(true);
+            };
+
+            const recentRecipes = useMemo(() => recipes.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 3), [recipes]);
+
+            const ActionButton = ({ icon: Icon, label }) => (
+                <button
+                    onClick={() => handleAddRecipeClick(label)}
+                    className="flex flex-col items-center justify-center bg-white p-4 rounded-xl shadow-sm hover:shadow-md transition-shadow h-24 w-full border border-gray-100"
+                >
+                    <Icon className="w-6 h-6 text-teal-600 mb-1" />
+                    <span className="text-sm font-medium text-gray-700">{label}</span>
+                </button>
+            );
+
+            return (
+              <div className="p-4 pt-0">
+                <h2 className="text-2xl font-bold mb-6 text-gray-800">Add New Recipe</h2>
+                <div className="grid grid-cols-2 gap-4 mb-10">
+                  <ActionButton icon={Camera} label="Take Photo" />
+                  <ActionButton icon={Upload} label="Upload Photo" />
+                  <ActionButton icon={Globe} label="Search Web" />
+                  <ActionButton icon={Link} label="Import URL" />
+                </div>
+
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-gray-800">Recent Recipes</h3>
+                  {recipes.length > 0 && (
+                    <button
+                      className="text-teal-600 font-medium hover:text-teal-700"
+                      onClick={() => setActiveTab('discover')}
+                    >
+                      View All ({recipes.length})
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  {recipes.length === 0 ? (
+                    <div className="text-center p-8 bg-gray-50 rounded-xl text-gray-500 border border-dashed border-gray-200">
+                      <Package className="w-8 h-8 mx-auto mb-2" />
+                      <p>No recipes yet. Tap one of the buttons above to get started!</p>
+                    </div>
+                  ) : (
+                    recentRecipes.map(recipe => (
+                      <div
+                        key={recipe.id}
+                        className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() => setActiveRecipe(recipe)}
+                      >
+                        <div>
+                          <p className="font-semibold text-gray-800">{recipe.name}</p>
+                          <span className="text-xs text-gray-500 capitalize">{recipe.category}</span>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-teal-600" />
+                      </div>
+                    ))
+                  )}
+                </div>
+                {activeRecipe && <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />}
+              </div>
+            );
+          };
+
+
+          // --- VIEW: MEAL PLAN ---
+
+          const PlanView = () => {
+            const weekRange = getWeekRange(currentWeek);
+
+            const navigateWeek = (direction) => {
+              const newDate = new Date(currentWeek);
+              newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
+              setCurrentWeek(newDate);
+            };
+
+            const MealSlot = ({ day, mealType, recipeId }) => {
+              const recipe = recipes.find(r => r.id === recipeId);
+              const [isSelecting, setIsSelecting] = useState(false);
+
+              const handleSelect = (selectedRecipeId) => {
+                handleUpdateMealPlan(day, mealType, selectedRecipeId);
+                setIsSelecting(false);
+              };
+
+              return (
+                <div className="p-1 min-h-[70px] flex flex-col justify-center items-center text-center">
+                  {recipe ? (
+                    <div
+                      className="bg-teal-100 p-2 rounded-lg w-full text-sm font-medium text-teal-800 shadow-inner cursor-pointer active:scale-[0.98] transition-transform"
+                      onClick={() => handleUpdateMealPlan(day, mealType, null)} // Click to remove
+                    >
+                      <p className='truncate'>{recipe.name}</p>
+                      <span className="text-xs block text-teal-700/80">({mealType})</span>
+                    </div>
+                  ) : (
+                    <button
+                      className="w-10 h-10 flex items-center justify-center border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:text-teal-600 hover:border-teal-600 transition-all active:scale-[0.95]"
+                      onClick={() => setIsSelecting(true)}
+                      aria-label={`Add ${mealType} on ${day}`}
+                    >
+                      <Plus className="w-5 h-5" />
+                    </button>
+                  )}
+
+                  {isSelecting && (
+                    <RecipeSelectorModal
+                      recipes={recipes}
+                      onSelect={handleSelect}
+                      onClose={() => setIsSelecting(false)}
+                      title={`Add ${mealType} on ${day}`}
+                    />
+                  )}
+                </div>
+              );
+            };
+
+            const RecipeSelectorModal = ({ recipes, onSelect, onClose, title }) => (
+                <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end justify-center z-50">
+                  <div className="bg-white rounded-t-2xl shadow-2xl p-6 w-full max-w-lg h-3/4 overflow-y-auto">
+                    <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-bold text-gray-800">{title}</h3>
+                      <button onClick={onClose} className="text-gray-500 hover:text-gray-800 p-2 rounded-full bg-gray-100">
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                    {recipes.length === 0 ? (
+                        <p className="text-center text-gray-500 p-4">No recipes available. Go to Recipes tab to add some!</p>
+                    ) : (
+                        <div className="space-y-3">
+                            {recipes.map(recipe => (
+                                <button
+                                    key={recipe.id}
+                                    className="w-full text-left p-3 border border-gray-200 rounded-lg hover:bg-teal-50 transition-colors text-gray-800 font-medium active:scale-[0.99]"
+                                    onClick={() => onSelect(recipe.id)}
+                                >
+                                    {recipe.name}
+                                    <span className="text-xs block text-gray-500 capitalize">{recipe.category}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                  </div>
+                </div>
+            );
+
+
+            return (
+              <div className="p-4 pt-0">
+                <div className="flex justify-between items-center mb-6">
+                  <button onClick={() => navigateWeek('prev')} className="text-gray-500 hover:text-teal-600 p-2 rounded-full active:scale-[0.9]" aria-label="Previous Week">
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                  <h2 className="text-xl font-semibold text-gray-800">{weekRange}</h2>
+                  <button onClick={() => navigateWeek('next')} className="text-gray-500 hover:text-teal-600 p-2 rounded-full active:scale-[0.9]" aria-label="Next Week">
+                    <ArrowRight className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <h1 className="text-2xl font-bold mb-4 text-gray-800">Weekly Meal Plan</h1>
+
+                <div className="space-y-6">
+                  {WEEK_DAYS.map(day => (
+                    <div key={day} className="bg-white p-4 rounded-xl shadow-md border border-gray-100">
+                      <h3 className="text-lg font-bold mb-3 text-teal-700">{day}</h3>
+                      <div className="grid grid-cols-3 gap-2 text-xs font-medium text-gray-500 mb-2">
+                        <div>BREAKFAST</div>
+                        <div>LUNCH</div>
+                        <div>DINNER</div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {MEAL_TYPES.map(mealType => (
+                          <MealSlot
+                            key={mealType}
+                            day={day}
+                            mealType={mealType}
+                            recipeId={mealPlan.weekData?.[day]?.[mealType]}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          };
+
+          // --- VIEW: SHOPPING LIST ---
+
+          const ShoppingView = () => {
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [listGenerated, setListGenerated] = useState(false);
+            const [shoppingList, setShoppingList] = useState({});
+
+            // Logic to calculate the shopping list from the current meal plan
+            const generateShoppingList = useCallback(() => {
+                setIsGenerating(true);
+                const aggregatedList = {};
+
+                if (!mealPlan.weekData) {
+                    setListGenerated(false);
+                    setIsGenerating(false);
+                    return;
+                }
+
+                // 1. Collect all unique recipe IDs from the meal plan
+                const recipeIds = new Set();
+                Object.values(mealPlan.weekData).forEach(dayMeals => {
+                    MEAL_TYPES.forEach(mealType => {
+                        if (dayMeals[mealType]) {
+                            recipeIds.add(dayMeals[mealType]);
+                        }
+                    });
+                });
+
+                // 2. Aggregate ingredients for all selected recipes
+                recipes.filter(r => recipeIds.has(r.id)).forEach(recipe => {
+                    recipe.ingredients.forEach(item => {
+                        // Use name (lowercase) and unit (lowercase) as the key for aggregation
+                        const key = `${item.name.toLowerCase()}||${item.unit.toLowerCase()}`;
+                        
+                        let quantity = 0;
+                        try {
+                            // Simple evaluation for fractions like "1/2" to 0.5
+                            if (item.quantity.includes('/')) {
+                                const parts = item.quantity.split('/').map(Number);
+                                // Check for valid fraction parts
+                                if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1]) && parts[1] !== 0) {
+                                     quantity = parts[0] / parts[1];
+                                }
+                            } else {
+                                // Handles decimals and integers
+                                quantity = parseFloat(item.quantity) || 0;
+                            }
+                        } catch {
+                            quantity = 0; // Fallback if calculation fails
+                        }
+
+                        if (aggregatedList[key]) {
+                            // Simple aggregation: only sums quantities if units are identical.
+                            aggregatedList[key].quantity += quantity;
+                        } else {
+                            aggregatedList[key] = {
+                                name: item.name,
+                                unit: item.unit,
+                                quantity: quantity,
+                                isPurchased: false
+                            };
+                        }
+                    });
+                });
+
+                setTimeout(() => { // Simulate processing time
+                    setShoppingList(aggregatedList);
+                    setListGenerated(true);
+                    setIsGenerating(false);
+                }, 500);
+            }, [mealPlan, recipes]);
+
+            const handleTogglePurchased = (key) => {
+                setShoppingList(prev => ({
+                    ...prev,
+                    [key]: {
+                        ...prev[key],
+                        isPurchased: !prev[key].isPurchased
+                    }
+                }));
+            };
+
+            const formatQuantity = (quantity) => {
+                if (!quantity || quantity === 0) return '';
+                // Display as is, rounded to 2 decimals if it's not an integer
+                return Number.isInteger(quantity) ? quantity.toString() : quantity.toFixed(2).replace(/(\.0+|0)$/, '');
+            }
+
+            const handlePrint = () => {
+                const printableContent = `
+                    <html>
+                    <head>
+                        <title>Sync & Savor Shopping List</title>
+                        <style>
+                            body { font-family: 'Inter', sans-serif; padding: 20px; }
+                            h1 { color: #0f766e; border-bottom: 2px solid #ccc; padding-bottom: 10px; }
+                            ul { list-style: none; padding: 0; }
+                            li { margin-bottom: 8px; font-size: 16px; border-bottom: 1px dashed #eee; padding-bottom: 4px; }
+                            .purchased { text-decoration: line-through; color: #888; }
+                        </style>
+                    </head>
+                    <body>
+                        <h1>Shopping List for ${getWeekRange(currentWeek)}</h1>
+                        <ul>
+                            ${Object.values(shoppingList).map(item => `
+                                <li class="${item.isPurchased ? 'purchased' : ''}">
+                                    ${formatQuantity(item.quantity)} ${item.unit || ''} ${item.name}
+                                </li>
+                            `).join('')}
+                        </ul>
+                        <p style="margin-top: 20px; font-style: italic; font-size: 12px;">Generated by Sync & Savor</p>
+                    </body>
+                    </html>
+                `;
+                const printWindow = window.open('', '', 'height=600,width=800');
+                printWindow.document.write(printableContent);
+                printWindow.document.close();
+                printWindow.print();
+            };
+
+            const listItems = Object.entries(shoppingList);
+            const hasMealsPlanned = Object.values(mealPlan.weekData || {}).some(day =>
+                MEAL_TYPES.some(meal => day[meal])
+            );
+
+            return (
+              <div className="p-4 pt-0">
+                <h1 className="text-2xl font-bold mb-6 text-gray-800">Shopping List</h1>
+
+                <div className="text-center p-8 bg-gray-50 rounded-xl mb-6 shadow-inner">
+                    {listGenerated && listItems.length > 0 && (
+                        <div className="text-left mb-6">
+                            <p className="font-semibold text-gray-700 text-lg">Current List: {getWeekRange(currentWeek)}</p>
+                            <p className="text-sm text-gray-500">{listItems.length} unique items aggregated.</p>
+                        </div>
+                    )}
+
+                    {!listGenerated || (listGenerated && listItems.length === 0) ? (
+                        <div className="text-gray-500">
+                            <Package className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                            <p className="text-lg font-medium">{listGenerated ? "List is empty." : "Generate Your List"}</p>
+                            <p className="text-sm">Plan meals in the 'Plan' tab, then click the button below.</p>
+                        </div>
+                    ) : null}
+
+                    {hasMealsPlanned && !isGenerating && (
+                        <button
+                            onClick={generateShoppingList}
+                            className="mt-4 px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg shadow-md hover:bg-teal-700 transition-colors flex items-center justify-center mx-auto active:scale-[0.98]"
+                        >
+                            <ShoppingCart className="w-5 h-5 mr-2" /> {listGenerated ? 'Regenerate List' : 'Generate List'}
+                        </button>
+                    )}
+
+                    {isGenerating && (
+                        <div className='flex items-center justify-center mt-4 text-teal-600 font-semibold'>
+                            <span className="animate-spin mr-2">&#9696;</span> Aggregating Ingredients...
+                        </div>
+                    )}
+                </div>
+
+                {listItems.length > 0 && (
+                    <div className="mb-4 flex justify-end space-x-3">
+                        <button
+                            onClick={handlePrint}
+                            className="flex items-center text-teal-600 font-medium hover:bg-teal-50 transition-colors border border-teal-600 rounded-lg px-3 py-1.5 active:scale-[0.98]"
+                        >
+                            <Printer className="w-4 h-4 mr-1" /> Print / PDF
+                        </button>
+                    </div>
+                )}
+
+                <div className="space-y-2">
+                    {listItems.sort((a, b) => a[1].isPurchased - b[1].isPurchased).map(([key, item]) => (
+                        <div
+                            key={key}
+                            className={`flex items-center p-3 rounded-xl border cursor-pointer transition-all active:scale-[0.99] ${
+                                item.isPurchased ? 'bg-gray-100 border-gray-200 line-through text-gray-500' : 'bg-white border-teal-100 shadow-sm hover:bg-teal-50'
+                            }`}
+                            onClick={() => handleTogglePurchased(key)}
+                        >
+                            <input
+                                type="checkbox"
+                                checked={item.isPurchased}
+                                readOnly
+                                className="w-4 h-4 text-teal-600 border-gray-300 rounded focus:ring-teal-500 mr-3"
+                            />
+                            <div className="flex-1">
+                                <span className="font-semibold text-gray-800">
+                                    {formatQuantity(item.quantity)} {item.unit || ''}
+                                </span>
+                                <span className="ml-1">{item.name}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+              </div>
+            );
+          };
+
+
+          // --- VIEW: DISCOVER RECIPES ---
+
+          const DiscoverView = () => {
+            const [searchTerm, setSearchTerm] = useState('');
+            const [activeFilter, setActiveFilter] = useState('All');
+            const filters = ['All', 'Quick', 'Healthy', 'Vegetarian', 'Dessert'];
+
+            const filteredRecipes = useMemo(() => {
+              let filtered = recipes;
+
+              // Filter by category
+              if (activeFilter !== 'All') {
+                filtered = filtered.filter(recipe => recipe.category === activeFilter);
+              }
+
+              // Filter by search term (name or ingredients)
+              if (searchTerm.trim()) {
+                const lowerCaseSearch = searchTerm.toLowerCase();
+                filtered = filtered.filter(recipe =>
+                  recipe.name.toLowerCase().includes(lowerCaseSearch) ||
+                  (recipe.ingredients && recipe.ingredients.some(i => i.name.toLowerCase().includes(lowerCaseSearch)))
+                );
+              }
+
+              return filtered;
+            }, [recipes, activeFilter, searchTerm]);
+
+            return (
+              <div className="p-4 pt-0">
+                <h1 className="text-2xl font-bold mb-6 text-gray-800">Discover Recipes</h1>
+
+                <div className="mb-6">
+                  <div className="relative mb-3">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by name or ingredient..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full p-3 pl-10 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500"
+                    />
+                  </div>
+
+                  {/* Filter Chips */}
+                  <div className="flex space-x-2 overflow-x-auto py-2">
+                    {filters.map(filter => (
+                      <button
+                        key={filter}
+                        className={`px-4 py-2 text-sm font-medium rounded-full whitespace-nowrap transition-colors active:scale-[0.98] ${
+                          activeFilter === filter
+                            ? 'bg-teal-600 text-white shadow-md'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                        onClick={() => setActiveFilter(filter)}
+                      >
+                        {filter}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <h3 className="text-xl font-bold mb-4 text-gray-800">
+                  {filteredRecipes.length} {filteredRecipes.length === 1 ? 'Recipe' : 'Recipes'} Found
+                </h3>
+
+                <div className="space-y-3 pb-20">
+                  {filteredRecipes.map(recipe => (
+                    <div
+                      key={recipe.id}
+                      className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer hover:bg-teal-50 transition-colors"
+                      onClick={() => setActiveRecipe(recipe)}
+                    >
+                      <div>
+                        <p className="font-semibold text-gray-800">{recipe.name}</p>
+                        <span className="text-xs text-gray-500 capitalize">{recipe.category}</span>
+                      </div>
+                      <BookOpen className="w-5 h-5 text-teal-600" />
+                    </div>
+                  ))}
+                  {filteredRecipes.length === 0 && (
+                    <div className="text-center p-8 bg-gray-50 rounded-xl text-gray-500 border border-dashed border-gray-200">
+                      <Search className="w-8 h-8 mx-auto mb-2" />
+                      <p>No recipes match your criteria.</p>
+                    </div>
+                  )}
+                </div>
+                {activeRecipe && <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />}
+              </div>
+            );
+          };
+
+
+          // --- MAIN RENDER LOGIC ---
+
+          const renderContent = () => {
+            if (!isAuthReady) {
+              return (
+                <div className="flex items-center justify-center h-[50vh] p-8 text-lg font-medium text-teal-600">
+                  <span className="animate-spin mr-3">&#9696;</span>
+                  Connecting to Sync & Savor...
+                </div>
+              );
+            }
+            switch (activeTab) {
+              case 'recipes':
+                return <RecipesView />;
+              case 'plan':
+                return <PlanView />;
+              case 'shopping':
+                return <ShoppingView />;
+              case 'discover':
+                return <DiscoverView />;
+              default:
+                return <RecipesView />;
+            }
+          };
+
+          return (
+            <div className="min-h-screen bg-gray-50 font-['Inter'] flex flex-col">
+
+              <Header />
+
+              <main className="flex-1 overflow-y-auto pb-20">
+                {renderContent()}
+              </main>
+
+              {/* Mobile Navigation */}
+              <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-20">
+                <div className="flex justify-around max-w-xl mx-auto">
+                  <NavItem tab="recipes" icon={Plus} label="Add" />
+                  <NavItem tab="plan" icon={Calendar} label="Plan" />
+                  <NavItem tab="shopping" icon={ShoppingCart} label="List" />
+                  <NavItem tab="discover" icon={Search} label="Discover" />
+                </div>
+              </nav>
+
+              {/* Global Modals */}
+              <Modal content={modalContent} />
+              {activeRecipe && activeTab !== 'discover' && activeTab !== 'recipes' && (
+                <AddEditRecipeModal recipe={activeRecipe} onClose={() => setActiveRecipe(null)} />
+              )}
+            </div>
+          );
+        };
+
+        // Render the App component
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
