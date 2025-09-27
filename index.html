@@ -201,9 +201,10 @@
                     <!-- Manual Entry Button -->
                     <button id="add-manual-recipe-btn" onclick="openModal('add-recipe-modal')" class="flex flex-col items-center justify-center p-4 h-24 bg-white text-primary-teal rounded-xl font-bold hover:bg-gray-100 transition transform hover:scale-[1.02] shadow-lg border border-primary-teal">
                         <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        Manual Entry / Add Recipe
+                        Manual Entry
                     </button>
-                    <button class="flex flex-col items-center justify-center p-4 h-24 bg-white bg-opacity-10 text-white rounded-xl font-semibold hover:bg-opacity-20 transition transform hover:scale-[1.02] shadow-md">
+                    <!-- Import URL Button (Updated) -->
+                    <button id="import-url-btn" onclick="openModal('import-url-modal')" class="flex flex-col items-center justify-center p-4 h-24 bg-white bg-opacity-10 text-white rounded-xl font-semibold hover:bg-opacity-20 transition transform hover:scale-[1.02] shadow-md">
                         <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.5 3-9s-1.343-9-3-9m0 18v-3m0-9v-3"></path></svg>
                         Import URL
                     </button>
@@ -433,6 +434,27 @@
             </div>
         </div>
     </div>
+    
+    <!-- Modal 4: Import Recipe from URL (New) -->
+    <div id="import-url-modal" class="modal-overlay fixed inset-0 flex items-center justify-center p-4">
+        <div class="modal-content bg-white p-6 rounded-2xl shadow-2xl overflow-y-auto">
+            <h3 class="text-2xl font-bold mb-4 text-dark-text">Import Recipe from URL</h3>
+            <p id="import-status-message" class="text-sm text-red-500 mb-4 hidden">Error: Could not extract recipe from URL.</p>
+            <form id="import-url-form">
+                <div class="mb-4">
+                    <label for="recipe-url" class="block text-sm font-medium text-gray-700 mb-1">Recipe Link <span class="text-red-500">*</span></label>
+                    <input type="url" id="recipe-url" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="Paste recipe URL here (e.g., https://example.com/best-cookies)">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" onclick="closeModal('import-url-modal')" class="px-5 py-2 border border-gray-300 rounded-lg text-dark-text hover:bg-light-gray transition">Cancel</button>
+                    <button type="submit" id="import-recipe-btn" class="px-5 py-2 bg-primary-teal text-white rounded-lg font-bold hover:bg-teal-dark transition shadow-md flex items-center justify-center disabled:opacity-50">
+                        <svg id="import-spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        Import Recipe
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 
     <!-- Firebase SDK Imports and Core App Logic -->
@@ -571,6 +593,32 @@
         }
 
         // --- Recipe Logic ---
+
+        /**
+         * Utility to save a new recipe document to Firestore.
+         * @param {object} recipeData - The structured recipe data.
+         */
+        async function saveRecipeToFirestore(recipeData) {
+            if (!db || !userId) {
+                console.error("Database or User ID is not ready.");
+                return false;
+            }
+            try {
+                const newRecipeDoc = {
+                    ...recipeData,
+                    createdAt: new Date().toISOString()
+                };
+                
+                // Firestore path: /artifacts/{appId}/users/{userId}/recipes
+                const userRecipesPath = `artifacts/${appId}/users/${userId}/recipes`;
+                const docRef = await addDoc(collection(db, userRecipesPath), newRecipeDoc);
+                console.log("Recipe added with ID: ", docRef.id);
+                return true;
+            } catch (e) {
+                console.error("Critical error saving recipe: ", e);
+                return false;
+            }
+        }
         
         function setupRecipeListener() {
             // MANDATORY PRIVATE DATA PATHING: /artifacts/{appId}/users/{userId}/recipes
@@ -589,7 +637,7 @@
                 
                 if (snapshot.empty) {
                     if (status) { 
-                        status.textContent = 'You have no recipes yet. Use the "Manual Entry / Add Recipe" button to add one!';
+                        status.textContent = 'You have no recipes yet. Use the "Manual Entry" or "Import URL" buttons to add one!';
                         status.style.display = 'block'; 
                         container.appendChild(status);
                     } else {
@@ -641,11 +689,7 @@
          */
         async function handleRecipeSubmission(e) {
             e.preventDefault();
-            if (!db || !userId) {
-                console.error("Database or User ID is not ready.");
-                return;
-            }
-
+            
             // Get values from form inputs
             const name = document.getElementById('recipe-name').value.trim();
             const description = document.getElementById('recipe-description').value.trim();
@@ -664,31 +708,136 @@
                 return;
             }
 
-            try {
-                // Prepare data for Firestore
-                const newRecipeDoc = {
-                    name,
-                    description,
-                    time,
-                    difficulty,
-                    ingredients,
-                    instructions,
-                    createdAt: new Date().toISOString()
-                };
-                
-                // Save to Firestore
-                const userRecipesPath = `artifacts/${appId}/users/${userId}/recipes`;
-                const docRef = await addDoc(collection(db, userRecipesPath), newRecipeDoc);
-                console.log("Manual Recipe added with ID: ", docRef.id);
-                
+            const recipeData = {
+                name,
+                description,
+                time,
+                difficulty,
+                ingredients,
+                instructions,
+            };
+
+            const saved = await saveRecipeToFirestore(recipeData);
+
+            if (saved) {
                 // Clear and close modal
                 document.getElementById('add-recipe-form').reset();
                 closeModal('add-recipe-modal'); 
-
-            } catch (e) {
-                console.error("Critical error saving recipe: ", e);
             }
         }
+
+        // --- LLM and Recipe Import Logic ---
+
+        const RECIPE_SCHEMA = {
+            type: "OBJECT",
+            properties: {
+                "name": { "type": "STRING", "description": "The full title of the recipe." },
+                "description": { "type": "STRING", "description": "A brief one or two sentence summary of the recipe." },
+                "time": { "type": "STRING", "description": "The estimated total preparation and cook time, e.g., '45 min'." },
+                "difficulty": { "type": "STRING", "enum": ["Easy", "Medium", "Hard"], "description": "Difficulty level based on complexity." },
+                "ingredients": {
+                    "type": "ARRAY",
+                    "items": { "type": "STRING", "description": "Each item is a single line, e.g., '1 cup all-purpose flour'." }
+                },
+                "instructions": {
+                    "type": "ARRAY",
+                    "items": { "type": "STRING", "description": "Each item is a single, concise step of the instructions." }
+                }
+            },
+            "required": ["name", "ingredients", "instructions"],
+            "propertyOrdering": ["name", "description", "time", "difficulty", "ingredients", "instructions"]
+        };
+
+        const MAX_RETRIES = 3;
+
+        /**
+         * Fetches and parses a recipe from a URL using the Gemini API with search grounding.
+         * @param {string} url - The URL to import the recipe from.
+         */
+        async function importRecipeFromUrl(e) {
+            e.preventDefault();
+
+            const url = document.getElementById('recipe-url').value;
+            if (!url) return;
+            
+            const importBtn = document.getElementById('import-recipe-btn');
+            const spinner = document.getElementById('import-spinner');
+            const form = document.getElementById('import-url-form');
+            const statusMessage = document.getElementById('import-status-message');
+            
+            importBtn.disabled = true;
+            importBtn.textContent = 'Importing...';
+            spinner.classList.remove('hidden');
+            statusMessage.classList.add('hidden');
+
+            const systemPrompt = "You are an expert recipe extractor. Given a URL, your task is to accurately extract the recipe's name, description, time, difficulty, ingredients, and instructions. The output MUST strictly adhere to the provided JSON schema. If any field (except name, ingredients, instructions) is not found, omit it or use an empty string/default value like 'N/A' or 'Easy'.";
+            const userQuery = `Find the recipe on this webpage: ${url}. Extract the details into the requested JSON format.`;
+            const apiKey = "";
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: RECIPE_SCHEMA
+                }
+            };
+            
+            let recipeData = null;
+            let attempt = 0;
+
+            while (attempt < MAX_RETRIES) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`API returned status ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const candidate = result.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        const jsonText = candidate.content.parts[0].text;
+                        recipeData = JSON.parse(jsonText);
+                        break; // Success, exit retry loop
+                    }
+                } catch (error) {
+                    console.error(`Attempt ${attempt + 1} failed:`, error);
+                    attempt++;
+                    if (attempt < MAX_RETRIES) {
+                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000)); // Exponential backoff
+                    }
+                }
+            }
+            
+            importBtn.disabled = false;
+            importBtn.textContent = 'Import Recipe';
+            spinner.classList.add('hidden');
+
+            if (recipeData) {
+                console.log("Successfully extracted recipe data:", recipeData);
+                const saved = await saveRecipeToFirestore(recipeData);
+                if (saved) {
+                    form.reset();
+                    closeModal('import-url-modal');
+                    // Automatically switch to the Recipes view
+                    showView('recipes');
+                    return;
+                }
+            }
+
+            // If we reach here, extraction or saving failed
+            statusMessage.textContent = 'Error: Could not extract recipe from the link or save it. Please check the URL and try again.';
+            statusMessage.classList.remove('hidden');
+        }
+
 
         // --- Recipe Detail Viewer ---
         
@@ -728,10 +877,8 @@
             if (Array.isArray(instructions) && instructions.length > 0) {
                 instructions.forEach((step, index) => {
                     const li = document.createElement('li');
-                    // FIX: Corrected regex literal in step.replace() which was causing SyntaxError
-                    // The regex checks if the step is already numbered (e.g., "1. ") and removes it 
-                    // before numbering it again, to prevent double numbering.
-                    li.textContent = step.match(/^\d+\./) 
+                    // Ensure the step is numbered correctly and avoid double numbering
+                    li.textContent = step.match(/^\d+\.\s*/) 
                         ? step 
                         : `${index + 1}. ${step.replace(/^\d+\.\s*/, '')}`;
                     instructionList.appendChild(li);
@@ -987,6 +1134,10 @@
                 if (modalId === 'select-recipe-modal') {
                     updateRecipeSelectorList();
                 }
+                // Reset URL form status when opening
+                if (modalId === 'import-url-modal') {
+                     document.getElementById('import-status-message').classList.add('hidden');
+                }
                 // Trigger reflow to apply transition
                 void modal.querySelector('.modal-content').offsetWidth;
                 modal.querySelector('.modal-content').style.opacity = '1';
@@ -1079,6 +1230,9 @@
             
             // Event listener for the Manual Recipe Submission form
             document.getElementById('add-recipe-form').addEventListener('submit', handleRecipeSubmission);
+            
+            // New listener for URL import form
+            document.getElementById('import-url-form').addEventListener('submit', importRecipeFromUrl);
         });
 
         // Expose functions to the global scope for inline HTML use
