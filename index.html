@@ -3,1246 +3,642 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sync & Savor</title>
-    <!-- Load Inter font -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <title>AI Meal Planner & Shopping List</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Custom Tailwind Configuration to match the visual scheme
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'cream-bg': '#FFFFFF',  // Main background color (pure white)
-                        'primary-teal': '#00A99D', // Bright, dominant teal/turquoise
-                        'teal-dark': '#008c84',   // Darker shade for hover/active states
-                        'dark-text': '#333333', // Dark text for contrast
-                        'light-gray': '#F8F8F8', // Subtle background for cards/sections
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
     <style>
-        /* Ensures the app uses the full viewport height and pads for fixed footer */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            background-color: #FFFFFF;
-            padding-bottom: 72px; /* Space for the fixed bottom navigation bar */
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f9;
         }
-        
-        /* Custom scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #f97316;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
         }
-        ::-webkit-scrollbar-track {
-            background: #FFFFFF;
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
-        ::-webkit-scrollbar-thumb {
-            background: #00A99D;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #008c84;
-        }
-        
-        /* Style for the meal plan box dashes */
-        .dashed-box {
-            border: 2px dashed #D1D5DB;
-            transition: border-color 0.2s, background-color 0.2s;
-        }
-        .dashed-box:hover {
-            border-color: #00A99D;
-            background-color: #F0FEFF; /* Lightest highlight */
-        }
-        .active-meal-slot {
-             border-color: #00A99D !important;
-             background-color: #E0F2F2; /* Very light teal highlight */
-             color: #008c84;
-             font-weight: 600;
-             cursor: default;
-             border-style: solid; /* Change to solid border when active */
-        }
-        .active-meal-slot:hover {
-             background-color: #E0F2F2; /* Keep highlight on hover */
-             border-color: #00A99D;
-        }
-
-        /* --- View Transition Improvements (UX) --- */
-        .view {
-            display: none;
-            opacity: 0;
-            padding-top: 7rem; /* Space for the fixed header */
-            padding-bottom: 5rem; /* Space for the fixed footer */
-            transition: opacity 0.3s ease-in-out;
-            touch-action: pan-y; 
-            min-height: 100%; /* Ensures the view content drives the scroll height */
-        }
-        .active-view {
-            display: block;
-            opacity: 1;
-        }
-
-        /* Fix for scrollable main area */
-        .main-content {
-            flex-grow: 1;
-            overflow-y: auto;
-            position: relative; 
-        }
-
-        /* Modal specific styles */
         .modal-overlay {
-            z-index: 50; /* Above all content */
-            background-color: rgba(0, 0, 0, 0.5);
-            display: none; 
-            overflow-y: auto; /* Allow scrolling within the overlay */
+            background-color: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(2px);
         }
-        .modal-active .modal-overlay {
-            display: flex;
+        .tab-active {
+            border-bottom: 3px solid #f97316;
+            color: #f97316;
+            font-weight: 600;
         }
-        .modal-content {
-            transform: translateY(20px);
-            opacity: 0;
-            transition: all 0.3s ease-out;
-            max-height: 90vh; /* Control maximum height for scrolling */
-            width: 95%;
-            max-width: 600px;
+        .recipe-card {
+            transition: transform 0.2s, box-shadow 0.2s;
         }
-        .modal-active .modal-content {
-            transform: translateY(0);
-            opacity: 1;
+        .recipe-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
-        
     </style>
 </head>
-<body class="font-sans text-dark-text">
+<body class="p-4 sm:p-8">
 
-    <!-- Top Header Bar (Fixed) -->
-    <header class="fixed top-0 w-full bg-cream-bg shadow-xl z-20">
-        <div class="px-6 py-4 flex items-center justify-between">
-            <!-- Logo Area -->
-            <div class="flex items-center space-x-2">
-                <div class="w-10 h-10 bg-primary-teal rounded-xl flex items-center justify-center text-white shadow-md">
-                    <!-- Book/Recipe Icon -->
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.206 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.832 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.832 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.168 18 16.5 18s-3.332.477-4.5 1.253"></path></svg>
-                </div>
-                <h1 class="text-2xl font-bold text-dark-text">Sync & Savor</h1>
-            </div>
+<div id="app" class="max-w-4xl mx-auto flex flex-col items-center py-10">
+    <h1 class="text-4xl font-extrabold text-gray-800 mb-2">🍽️ AI Meal Planner</h1>
+    <p class="text-sm text-gray-500 mb-4 text-center">User ID: <span id="userIdDisplay" class="font-mono text-xs bg-gray-100 p-1 rounded">Loading...</span></p>
+    
+    <!-- Tab Navigation -->
+    <div class="w-full mb-6 flex border-b border-gray-200 bg-white rounded-t-xl shadow-md">
+        <button id="recipesTab" data-tab="recipes" class="tab-button flex-1 py-3 text-lg text-gray-600 transition duration-150 tab-active">My Recipes</button>
+        <button id="shoppingTab" data-tab="shopping" class="tab-button flex-1 py-3 text-lg text-gray-600 transition duration-150">Shopping List</button>
+    </div>
 
-            <!-- Action Icons -->
-            <div class="flex space-x-3">
-                <button class="p-2 rounded-full hover:bg-light-gray transition" aria-label="Search recipes">
-                    <!-- Search Icon -->
-                    <svg class="w-6 h-6 text-dark-text" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                </button>
-                <button id="user-info-btn" class="p-2 rounded-full hover:bg-light-gray transition" aria-label="User profile and settings">
-                    <!-- User Icon -->
-                    <svg class="w-6 h-6 text-dark-text" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14c-4.418 0-8 3.582-8 8h16c0-4.418-3.582-8-8-8z"></path></svg>
-                </button>
-            </div>
-        </div>
-        <p id="user-id-display" class="text-xs text-center text-gray-500 pb-2 hidden">
-            User ID: <span class="font-mono font-semibold">...</span>
-        </p>
-    </header>
-
-    <!-- Main Content Area (Scrollable) -->
-    <main class="main-content px-6">
+    <!-- Main Content Area -->
+    <div id="contentArea" class="w-full bg-white p-6 rounded-b-xl shadow-lg border border-gray-100">
         
-        <!-- Recipe Card Template (Hidden/Re-usable) -->
-        <template id="recipe-card-template">
-             <div class="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col sm:flex-row mb-6 border border-gray-100 transition hover:shadow-xl cursor-pointer" onclick="openRecipeDetail(this)">
-                <!-- Image Placeholder -->
-                <div class="w-full sm:w-40 h-40 sm:h-auto bg-primary-teal flex items-center justify-center flex-shrink-0">
-                    <img class="w-full h-full object-cover" src="https://placehold.co/400x400/00A99D/FFFFFF?text=Recipe+Image" onerror="this.onerror=null;this.src='https://placehold.co/400x400/00A99D/FFFFFF?text=Recipe';" alt="Recipe Image Placeholder">
-                </div>
-                <div class="p-4 flex-grow">
-                    <h4 class="text-xl font-bold mb-1 truncate text-dark-text" data-name>Recipe Name Placeholder</h4>
-                    <p class="text-sm text-gray-500 mb-3 line-clamp-2" data-description>A simple recipe description.</p>
-                    <div class="flex flex-wrap items-center text-sm text-gray-600 space-x-4">
-                        <span class="flex items-center">
-                            <!-- Clock Icon -->
-                            <svg class="w-4 h-4 mr-1 text-primary-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                            <span data-time>30 min</span>
-                        </span>
-                         <span class="flex items-center">
-                            <!-- Fire Icon -->
-                            <svg class="w-4 h-4 mr-1 text-primary-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c-2 3-2.9 5.8-3.3 7.6M12 21V12.75M12 9a3 3 0 00-3 3v3h6v-3a3 3 0 00-3-3z"></path></svg>
-                            <span data-difficulty>Easy</span>
-                        </span>
-                        <span class="text-xs font-semibold text-gray-600 bg-gray-200 px-2 py-0.5 rounded-full" data-tags>User Added</span>
-                    </div>
-                </div>
-            </div>
-        </template>
-
-
-        <!-- Recipes View (Active by default) -->
-        <section id="recipes-view" class="view active-view">
-            <div class="mb-6 rounded-2xl p-6 text-white bg-primary-teal shadow-xl">
-                <h2 class="text-3xl font-bold mb-4">Add New Recipe</h2>
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Standard Buttons (Placeholders) -->
-                    <button class="flex flex-col items-center justify-center p-4 h-24 bg-white bg-opacity-10 text-white rounded-xl font-semibold hover:bg-opacity-20 transition transform hover:scale-[1.02] shadow-md">
-                        <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.218A2 2 0 0110.123 3h3.757a2 2 0 011.664.89l.812 1.218A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        Take Photo
-                    </button>
-                    <button class="flex flex-col items-center justify-center p-4 h-24 bg-white bg-opacity-10 text-white rounded-xl font-semibold hover:bg-opacity-20 transition transform hover:scale-[1.02] shadow-md">
-                        <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-                        Upload Photo
-                    </button>
-                    <!-- Manual Entry Button -->
-                    <button id="add-manual-recipe-btn" onclick="openModal('add-recipe-modal')" class="flex flex-col items-center justify-center p-4 h-24 bg-white text-primary-teal rounded-xl font-bold hover:bg-gray-100 transition transform hover:scale-[1.02] shadow-lg border border-primary-teal">
-                        <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        Manual Entry
-                    </button>
-                    <!-- Import URL Button (Updated) -->
-                    <button id="import-url-btn" onclick="openModal('import-url-modal')" class="flex flex-col items-center justify-center p-4 h-24 bg-white bg-opacity-10 text-white rounded-xl font-semibold hover:bg-opacity-20 transition transform hover:scale-[1.02] shadow-md">
-                        <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.5 3-9s-1.343-9-3-9m0 18v-3m0-9v-3"></path></svg>
-                        Import URL
-                    </button>
-                </div>
-            </div>
-            
-            <div class="flex justify-between items-center mb-4 mt-12">
-                <h3 class="text-xl font-bold text-dark-text">Your Recipes</h3>
-                <button class="text-primary-teal font-semibold text-sm hover:text-teal-dark transition">View All</button>
-            </div>
-             <div id="recent-recipes-list">
-                <!-- Recipes fetched from Firestore will be inserted here -->
-                <p id="recipe-list-status" class="text-center text-gray-500 italic py-8">Loading your recipes...</p>
-            </div>
-        </section>
-        
-        <!-- Plan View -->
-        <section id="plan-view" class="view">
-             <h2 class="text-3xl font-bold text-dark-text mb-6">Weekly Meal Plan</h2>
-            
-            <!-- Plan Assistant (Future Feature Placeholder) -->
-            <div class="mb-8 p-6 bg-light-gray rounded-xl border border-gray-200">
-                <h3 class="text-xl font-bold text-primary-teal mb-3">Plan Assistant</h3>
-                <p class="text-sm text-gray-700 mb-4">This section is for future planning features.</p>
-                <div class="flex space-x-2">
-                    <input type="text" id="plan-prompt" placeholder="e.g. 5-day vegetarian plan" class="flex-grow p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition">
-                    <button id="generate-plan-btn" class="px-5 py-3 bg-teal-dark text-white rounded-lg font-semibold hover:bg-primary-teal transition shadow-md flex items-center justify-center disabled:opacity-50">
-                        Generate Plan
-                    </button>
-                </div>
-            </div>
-
+        <div id="recipesView" data-view="recipes" class="view-content">
             <div class="flex justify-between items-center mb-6">
-                <button class="p-2 rounded-full hover:bg-light-gray transition" aria-label="Previous week">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                <h2 class="text-2xl font-semibold text-gray-700">Recipe Collection</h2>
+                <button id="openAddRecipeModal"
+                        class="bg-orange-500 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-orange-600 transition duration-200 flex items-center">
+                    <svg class="w-5 h-5 mr-1" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clip-rule="evenodd"></path></svg>
+                    Add Recipe
                 </button>
-                <span id="current-week-display" class="text-xl font-semibold text-dark-text">Loading Week...</span>
-                <button class="p-2 rounded-full hover:bg-light-gray transition" aria-label="Next week">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+            </div>
+            <div id="recipeList" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <p id="loadingRecipes" class="col-span-full text-center text-gray-500">Loading recipes...</p>
+                <!-- Recipes loaded from Firestore will go here -->
+            </div>
+        </div>
+
+        <div id="shoppingView" data-view="shopping" class="view-content hidden">
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">🛒 Consolidated Shopping List</h2>
+            <p class="text-sm text-gray-500 mb-4">This list combines all ingredients from all recipes currently saved.</p>
+            <div id="shoppingListContainer" class="bg-gray-50 p-4 rounded-lg border">
+                <!-- Shopping list generated from recipes will go here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for Adding Recipe -->
+<div id="addRecipeModal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto transform transition-all p-6">
+        <div class="flex justify-between items-center border-b pb-3 mb-4">
+            <h3 class="text-xl font-bold text-gray-800">Add New Recipe</h3>
+            <button id="closeAddRecipeModal" class="text-gray-400 hover:text-gray-600 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <!-- Recipe Input Tabs -->
+        <div class="flex mb-4">
+            <button id="searchTab" data-input="search" class="input-tab flex-1 py-2 text-center text-gray-600 border-b-2 border-orange-500 font-semibold transition">AI Web Search</button>
+            <button id="manualTab" data-input="manual" class="input-tab flex-1 py-2 text-center text-gray-600 border-b-2 border-gray-200 transition">Manual Entry</button>
+        </div>
+
+        <!-- AI Search View -->
+        <div id="searchView" data-input-view="search" class="input-view-content">
+            <form id="aiSearchForm">
+                <label for="searchQuery" class="block text-sm font-medium text-gray-700 mb-2">Search for a recipe (e.g., 'Spicy Chicken Curry'):</label>
+                <input type="text" id="searchQuery" required placeholder="Enter dish name"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500 mb-4">
+                <button type="submit" id="searchButton"
+                        class="w-full bg-orange-500 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-orange-600 transition duration-200 flex items-center justify-center disabled:opacity-50">
+                    <span id="searchButtonText">Find & Import Recipe</span>
+                    <div id="searchSpinner" class="spinner hidden ml-2"></div>
                 </button>
-            </div>
+                <div id="searchMessage" class="mt-3 p-3 bg-blue-100 text-blue-800 rounded-lg hidden"></div>
+            </form>
+        </div>
 
-            <!-- Full Week Layout - Initial content removed, now purely dynamic -->
-            <div id="weekly-plan-container">
-            </div>
-        </section>
-        
-        <!-- Shopping List View -->
-        <section id="shopping-view" class="view">
-            <h2 class="text-3xl font-bold text-dark-text mb-10">Shopping List</h2>
-            
-            <div class="flex flex-col items-center justify-center p-10 bg-light-gray rounded-xl text-center shadow-md">
-                 <svg class="w-16 h-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10m-8-4h16"></path></svg>
-                <p class="text-gray-500 text-lg">Your shopping list is empty.</p>
-                <p class="text-gray-500 text-sm mt-1">Generate one from your meal plans!</p>
-            </div>
-        </section>
-        
-        <!-- Discover View -->
-        <section id="discover-view" class="view">
-             <h2 class="text-3xl font-bold text-dark-text mb-6">Discover Recipes</h2>
-
-             <!-- Search Input -->
-             <div class="mb-6">
-                <input type="text" placeholder="Search recipes, ingredients..."
-                    class="w-full p-4 border border-gray-200 rounded-xl bg-light-gray focus:outline-none focus:border-primary-teal focus:ring-1 focus:ring-primary-teal transition text-dark-text placeholder-gray-500 shadow-sm">
-             </div>
-
-             <!-- Filter Pills -->
-             <div class="flex space-x-2 overflow-x-auto mb-10 pb-2">
-                <button class="px-4 py-2 rounded-full text-white bg-primary-teal font-medium flex-shrink-0 shadow-md transition transform hover:scale-[1.05]">All</button>
-                <button class="px-4 py-2 rounded-full border border-gray-300 bg-white text-dark-text font-medium hover:bg-light-gray flex-shrink-0 transition transform hover:scale-[1.05] shadow-sm">Quick</button>
-                <button class="px-4 py-2 rounded-full border border-gray-300 bg-white text-dark-text font-medium hover:bg-light-gray flex-shrink-0 transition transform hover:scale-[1.05] shadow-sm">Healthy</button>
-             </div>
-             
-             <!-- Discover List -->
-             <div id="discover-recipes-list">
-                 <!-- Mock Recipe Card for visual style, will be replaced by public data later -->
-                 <div class="bg-white rounded-xl shadow-lg overflow-hidden flex flex-col sm:flex-row mb-6 border border-gray-100 cursor-default">
-                    <div class="w-full sm:w-40 h-40 sm:h-auto bg-gray-300 flex items-center justify-center flex-shrink-0">
-                         <img class="w-full h-full object-cover" src="https://placehold.co/400x400/808080/FFFFFF?text=Public+Recipe" onerror="this.onerror=null;this.src='https://placehold.co/400x400/808080/FFFFFF?text=Public';" alt="Recipe Image Placeholder">
-                    </div>
-                    <div class="p-4 flex-grow">
-                        <h4 class="text-xl font-bold mb-1 truncate text-dark-text">Community Chicken Stir Fry</h4>
-                        <p class="text-sm text-gray-500 mb-3">A delicious recipe shared by the Sync & Savor community.</p>
-                        <span class="text-xs font-semibold text-gray-600 bg-gray-200 px-2 py-0.5 rounded-full">Community Share</span>
-                    </div>
-                </div>
-             </div>
-        </section>
-    </main>
-
-    <!-- Bottom Navigation Bar (Fixed) -->
-    <footer id="bottom-nav" class="fixed bottom-0 left-0 right-0 bg-cream-bg border-t border-gray-100 shadow-2xl p-2 h-20 flex justify-around items-center z-20">
-        
-        <!-- Tab 1: Recipes (Active by default) -->
-        <a href="#" onclick="showView('recipes', event)" data-view="recipes" role="button" aria-label="Recipes tab"
-           class="nav-tab flex flex-col items-center justify-center p-2 rounded-xl transition duration-200 text-primary-teal">
-            <svg class="w-6 h-6 mb-1" fill="currentColor" stroke="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 19V5a2 2 0 012-2h10a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2zm2-2a.5.5 0 00.5.5h9a.5.5 0 00.5-.5V6a.5.5 0 00-.5-.5h-9a.5.5 0 00-.5.5v11zM10.5 7h3v1h-3V7zm0 2h3v1h-3V9zm-3 2h9v1h-9v-1zM7.5 13h9v1h-9v-1zM7.5 15h9v1h-9v-1z"/></svg>
-            <span class="text-xs font-semibold">Recipes</span>
-        </a>
-        
-        <!-- Tab 2: Plan -->
-        <a href="#" onclick="showView('plan', event)" data-view="plan" role="button" aria-label="Meal Plan tab"
-           class="nav-tab flex flex-col items-center justify-center p-2 rounded-xl transition duration-200 text-gray-500 hover:text-primary-teal">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-            <span class="text-xs font-medium">Plan</span>
-        </a>
-        
-        <!-- Tab 3: Shopping -->
-        <a href="#" onclick="showView('shopping', event)" data-view="shopping" role="button" aria-label="Shopping List tab"
-           class="nav-tab flex flex-col items-center justify-center p-2 rounded-xl transition duration-200 text-gray-500 hover:text-primary-teal">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-            <span class="text-xs font-medium">Shopping</span>
-        </a>
-
-        <!-- Tab 4: Discover -->
-        <a href="#" onclick="showView('discover', event)" data-view="discover" role="button" aria-label="Discover tab"
-           class="nav-tab flex flex-col items-center justify-center p-2 rounded-xl transition duration-200 text-gray-500 hover:text-primary-teal">
-            <svg class="w-6 h-6 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 2 0 0015.586 3H7a2 2 0 00-2 2v11m4-1h5m-5 4h5m-9-11h9"></path></svg>
-            <span class="text-xs font-medium">Discover</span>
-        </a>
-    </footer>
-    
-    <!-- Modal 1: Recipe Creation/Manual Entry -->
-    <div id="add-recipe-modal" class="modal-overlay fixed inset-0 flex items-center justify-center p-4">
-        <div class="modal-content bg-white p-6 rounded-2xl shadow-2xl overflow-y-auto">
-            <h3 class="text-2xl font-bold mb-4 text-dark-text">Enter New Recipe Details</h3>
-            <form id="add-recipe-form">
+        <!-- Manual Entry View -->
+        <div id="manualView" data-input-view="manual" class="input-view-content hidden">
+            <form id="manualEntryForm">
                 <div class="mb-4">
-                    <label for="recipe-name" class="block text-sm font-medium text-gray-700 mb-1">Recipe Name <span class="text-red-500">*</span></label>
-                    <input type="text" id="recipe-name" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="e.g., Spicy Shrimp Pasta">
+                    <label for="manualTitle" class="block text-sm font-medium text-gray-700 mb-1">Recipe Title</label>
+                    <input type="text" id="manualTitle" required placeholder="e.g., Grandma's Tomato Sauce"
+                           class="w-full p-2 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500">
                 </div>
                 <div class="mb-4">
-                    <label for="recipe-description" class="block text-sm font-medium text-gray-700 mb-1">Short Description</label>
-                    <textarea id="recipe-description" rows="2" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="A brief, appealing summary."></textarea>
+                    <label for="manualIngredients" class="block text-sm font-medium text-gray-700 mb-1">Ingredients (One per line)</label>
+                    <textarea id="manualIngredients" rows="4" required placeholder="1 cup flour&#10;2 tbsp sugar&#10;1 large egg"
+                              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500"></textarea>
                 </div>
-                <div class="grid grid-cols-2 gap-4 mb-6">
-                    <div>
-                        <label for="recipe-time" class="block text-sm font-medium text-gray-700 mb-1">Time (e.g., 30 min)</label>
-                        <input type="text" id="recipe-time" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="45 min">
-                    </div>
-                    <div>
-                        <label for="recipe-difficulty" class="block text-sm font-medium text-gray-700 mb-1">Difficulty</label>
-                         <select id="recipe-difficulty" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition bg-white">
-                            <option>Easy</option>
-                            <option>Medium</option>
-                            <option>Hard</option>
-                        </select>
-                    </div>
+                <div class="mb-6">
+                    <label for="manualInstructions" class="block text-sm font-medium text-gray-700 mb-1">Instructions (One step per line)</label>
+                    <textarea id="manualInstructions" rows="6" required placeholder="Step 1: Preheat oven...&#10;Step 2: Mix wet ingredients..."
+                              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-orange-500 focus:border-orange-500"></textarea>
                 </div>
-
-                 <div class="mb-4">
-                    <label for="recipe-ingredients" class="block text-sm font-medium text-gray-700 mb-1">Ingredients (One per line)</label>
-                    <textarea id="recipe-ingredients" rows="5" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="1 cup flour\n2 eggs\n1/2 cup milk"></textarea>
-                </div>
-
-                 <div class="mb-6">
-                    <label for="recipe-instructions" class="block text-sm font-medium text-gray-700 mb-1">Instructions (One step per line)</label>
-                    <textarea id="recipe-instructions" rows="5" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="1. Preheat oven to 350°F.\n2. Mix ingredients well.\n3. Bake for 25 minutes."></textarea>
-                </div>
-
-
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('add-recipe-modal')" class="px-5 py-2 border border-gray-300 rounded-lg text-dark-text hover:bg-light-gray transition">Cancel</button>
-                    <button type="submit" id="save-recipe-btn" class="px-5 py-2 bg-primary-teal text-white rounded-lg font-bold hover:bg-teal-dark transition shadow-md flex items-center justify-center">
-                        Save Recipe
-                    </button>
-                </div>
+                <button type="submit"
+                        class="w-full bg-green-500 text-white font-semibold py-3 rounded-lg shadow-md hover:bg-green-600 transition duration-200">
+                    Save Manual Recipe
+                </button>
             </form>
         </div>
     </div>
+</div>
 
-    <!-- Modal 2: Recipe Detail Viewer -->
-    <div id="recipe-detail-modal" class="modal-overlay fixed inset-0 flex items-center justify-center p-4">
-        <div id="detail-content" class="modal-content bg-white p-6 rounded-2xl shadow-2xl overflow-y-auto max-h-[90vh]">
-            <h3 id="detail-name" class="text-3xl font-bold mb-2 text-dark-text"></h3>
-            <p id="detail-description" class="text-md text-gray-600 mb-4"></p>
+<!-- Modal for Recipe Details -->
+<div id="recipeDetailModal" class="modal-overlay fixed inset-0 z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto transform transition-all p-6">
+        <div class="flex justify-between items-start border-b pb-3 mb-4">
+            <h3 id="detailTitle" class="text-2xl font-bold text-gray-800">Recipe Title</h3>
+            <button id="closeRecipeDetailModal" class="text-gray-400 hover:text-gray-600 transition ml-4">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+
+        <p id="detailDescription" class="text-gray-600 mb-6 italic"></p>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Ingredients Column -->
+            <div>
+                <h4 class="text-xl font-semibold text-orange-600 mb-3 border-b pb-1">Ingredients 📝</h4>
+                <ul id="detailIngredients" class="list-none space-y-2 text-gray-700">
+                    <!-- Ingredients list will be populated here -->
+                </ul>
+            </div>
             
-            <div class="flex flex-wrap items-center text-sm text-gray-600 space-x-4 mb-6 pb-2 border-b border-gray-100">
-                <span class="flex items-center">
-                    <svg class="w-4 h-4 mr-1 text-primary-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Time: <span class="font-semibold ml-1" data-detail="time"></span>
-                </span>
-                 <span class="flex items-center">
-                    <svg class="w-4 h-4 mr-1 text-primary-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 18.657A8 8 0 016.343 7.343S7 9 9 10c-2 3-2.9 5.8-3.3 7.6M12 21V12.75M12 9a3 3 0 00-3 3v3h6v-3a3 3 0 00-3-3z"></path></svg>
-                    Difficulty: <span class="font-semibold ml-1" data-detail="difficulty"></span>
-                </span>
-            </div>
-
-            <!-- Ingredients -->
-            <h4 class="text-xl font-bold mt-4 mb-3 text-dark-text">Ingredients</h4>
-            <ul id="detail-ingredients" class="list-disc list-inside space-y-1 text-gray-700 pl-4">
-                <!-- Ingredients listed here -->
-            </ul>
-
-            <!-- Instructions -->
-            <h4 class="text-xl font-bold mt-6 mb-3 text-dark-text">Instructions</h4>
-            <ol id="detail-instructions" class="list-decimal list-inside space-y-3 text-gray-700 pl-4">
-                <!-- Instructions listed here -->
-            </ol>
-
-            <div class="flex justify-end mt-8">
-                <button type="button" onclick="closeModal('recipe-detail-modal')" class="px-5 py-2 bg-primary-teal text-white rounded-lg font-semibold hover:bg-teal-dark transition shadow-md">Close</button>
+            <!-- Instructions Column -->
+            <div>
+                <h4 class="text-xl font-semibold text-orange-600 mb-3 border-b pb-1">Instructions 🧑‍🍳</h4>
+                <ol id="detailInstructions" class="list-decimal list-inside space-y-3 text-gray-700">
+                    <!-- Instructions list will be populated here -->
+                </ol>
             </div>
         </div>
     </div>
+</div>
+
+
+<script type="module">
+    // --- Firebase Imports ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Global Configuration ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
     
-    <!-- Modal 3: Recipe Selector for Meal Plan -->
-    <div id="select-recipe-modal" class="modal-overlay fixed inset-0 flex items-center justify-center p-4">
-        <div class="modal-content bg-white p-6 rounded-2xl shadow-2xl max-h-[90vh] flex flex-col">
-            <h3 class="text-2xl font-bold mb-4 text-dark-text">Select Recipe for Plan</h3>
-            <p id="slot-context" class="text-gray-600 mb-4"></p>
-            
-            <div id="recipe-selection-list" class="flex-grow overflow-y-auto space-y-3 border-t border-gray-100 pt-4">
-                <p class="text-center text-gray-500 italic py-4" id="recipe-select-status">Loading recipes...</p>
-                <!-- Recipe list items inserted here -->
-            </div>
+    // Gemini API Setup
+    const apiKey = ""; // Canvas runtime injects the key if this is empty
+    const model = "gemini-2.5-flash-preview-05-20";
+    // The URL must include the '?key=${apiKey}' parameter for the Canvas environment 
+    // to correctly inject the API key, even when apiKey is empty.
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const MAX_RETRIES = 3;
 
-            <div class="flex justify-between mt-6 pt-4 border-t border-gray-100">
-                <button type="button" id="remove-meal-btn" onclick="removeMealAssignment()" class="px-5 py-2 border border-red-500 text-red-500 rounded-lg hover:bg-red-50 transition hover:text-red-600">
-                    Remove Meal
-                </button>
-                <button type="button" onclick="closeModal('select-recipe-modal')" class="px-5 py-2 bg-primary-teal text-white rounded-lg font-semibold hover:bg-teal-dark transition shadow-md">
-                    Done
-                </button>
-            </div>
-        </div>
-    </div>
+    // --- Application State and Firebase Instances ---
+    let db;
+    let auth;
+    let userId = null;
+    let userRecipes = [];
+    let isAuthReady = false;
+
+    // --- DOM Elements ---
+    const userIdDisplay = document.getElementById('userIdDisplay');
+    const recipeList = document.getElementById('recipeList');
+    const loadingRecipes = document.getElementById('loadingRecipes');
+    const shoppingListContainer = document.getElementById('shoppingListContainer');
     
-    <!-- Modal 4: Import Recipe from URL (New) -->
-    <div id="import-url-modal" class="modal-overlay fixed inset-0 flex items-center justify-center p-4">
-        <div class="modal-content bg-white p-6 rounded-2xl shadow-2xl overflow-y-auto">
-            <h3 class="text-2xl font-bold mb-4 text-dark-text">Import Recipe from URL</h3>
-            <p id="import-status-message" class="text-sm text-red-500 mb-4 hidden">Error: Could not extract recipe from URL.</p>
-            <form id="import-url-form">
-                <div class="mb-4">
-                    <label for="recipe-url" class="block text-sm font-medium text-gray-700 mb-1">Recipe Link <span class="text-red-500">*</span></label>
-                    <input type="url" id="recipe-url" required class="w-full p-3 border border-gray-300 rounded-lg focus:ring-primary-teal focus:border-primary-teal transition placeholder-gray-400" placeholder="Paste recipe URL here (e.g., https://example.com/best-cookies)">
-                </div>
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('import-url-modal')" class="px-5 py-2 border border-gray-300 rounded-lg text-dark-text hover:bg-light-gray transition">Cancel</button>
-                    <button type="submit" id="import-recipe-btn" class="px-5 py-2 bg-primary-teal text-white rounded-lg font-bold hover:bg-teal-dark transition shadow-md flex items-center justify-center disabled:opacity-50">
-                        <svg id="import-spinner" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Import Recipe
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
+    // Modal Elements (Add Recipe)
+    const addRecipeModal = document.getElementById('addRecipeModal');
+    const openAddRecipeModalButton = document.getElementById('openAddRecipeModal');
+    const closeAddRecipeModalButton = document.getElementById('closeAddRecipeModal');
+    
+    // Modal Elements (Recipe Details)
+    const recipeDetailModal = document.getElementById('recipeDetailModal');
+    const closeRecipeDetailModal = document.getElementById('closeRecipeDetailModal');
+    const detailTitle = document.getElementById('detailTitle');
+    const detailDescription = document.getElementById('detailDescription');
+    const detailIngredients = document.getElementById('detailIngredients');
+    const detailInstructions = document.getElementById('detailInstructions');
 
+    // AI Search Elements
+    const aiSearchForm = document.getElementById('aiSearchForm');
+    const searchQueryInput = document.getElementById('searchQuery');
+    const searchButton = document.getElementById('searchButton');
+    const searchButtonText = document.getElementById('searchButtonText');
+    const searchSpinner = document.getElementById('searchSpinner');
+    const searchMessage = document.getElementById('searchMessage');
 
-    <!-- Firebase SDK Imports and Core App Logic -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, query, onSnapshot, addDoc, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        // Enable Firebase debugging in console
-        setLogLevel('debug');
-        
-        // --- Global State ---
-        let app, db, auth;
-        let userId = null;
-        let isAuthReady = false;
-        let currentView = 'recipes'; 
-        let allRecipes = {}; // Store recipes by ID: { [recipeId]: { ...recipeData } }
-        let currentPlan = {}; // Store current week's plan: { [day]: { [meal]: { recipeId: '...' } } }
-        let currentWeekId = getWeekId(new Date()); // e.g., '2025-W39'
-        let currentSelectedSlot = { day: null, meal: null, recipeId: null }; // For Meal Planning Modal
-        
-        // Global variables are provided by the canvas environment
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        let firebaseConfig = {};
+    // Manual Entry Elements
+    const manualEntryForm = document.getElementById('manualEntryForm');
+    const manualTitleInput = document.getElementById('manualTitle');
+    const manualIngredientsInput = document.getElementById('manualIngredients');
+    const manualInstructionsInput = document.getElementById('manualInstructions');
+    
+    // Recipe Schema for Gemini Structured Output
+    const recipeSchema = {
+        type: "OBJECT",
+        properties: {
+            "title": { "type": "STRING" },
+            "description": { "type": "STRING" },
+            "ingredients": { "type": "ARRAY", "items": { "type": "STRING" } },
+            "instructions": { "type": "ARRAY", "items": { "type": "STRING" } }
+        },
+        "required": ["title", "ingredients", "instructions"]
+    };
+
+    // --- Firebase Initialization and Auth ---
+    async function initializeFirebase() {
+        setLogLevel('Debug');
+        const app = initializeApp(firebaseConfig);
+        db = getFirestore(app);
+        auth = getAuth(app);
+
         try {
-            firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        } catch (e) {
-            console.error("Firebase Config Parsing Error:", e);
+            const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+        } catch (error) {
+            console.error("Firebase authentication failed:", error);
         }
 
-        // --- Date & Week Helpers ---
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+            } else {
+                // Fallback for anonymous user or failure
+                userId = crypto.randomUUID();
+            }
+            userIdDisplay.textContent = userId;
+            isAuthReady = true;
+            loadRecipes(); // Start loading data once auth is ready
+        });
+    }
 
-        /**
-         * Calculates the unique ID for the current week (e.g., '2025-W39').
-         * @param {Date} d - The date object.
-         * @returns {string} The week ID.
-         */
-        function getWeekId(d) {
-            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-            const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-            const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-            return `${d.getUTCFullYear()}-W${weekNo}`;
+    // --- Firestore Data Handlers ---
+
+    function getRecipeCollectionRef() {
+        if (!userId) return null;
+        const recipeCollectionPath = `/artifacts/${appId}/users/${userId}/recipes`;
+        return collection(db, recipeCollectionPath);
+    }
+
+    // Load recipes in real-time
+    function loadRecipes() {
+        if (!isAuthReady) return;
+        
+        const recipesRef = getRecipeCollectionRef();
+        if (!recipesRef) {
+            console.warn("Firestore collection reference not available.");
+            return;
         }
 
-        /**
-         * Formats the current week for display.
-         * @param {string} weekId - The week ID (e.g., '2025-W39').
-         * @returns {string} Display string (e.g., 'Sep 21 - Sep 27').
-         */
-        function getWeekDisplay(weekId) {
-            // Simplified for presentation: will only show the current week
-            const now = new Date();
-            const startOfWeek = new Date(now);
-            startOfWeek.setDate(now.getDate() - (now.getDay() === 0 ? 6 : now.getDay() - 1)); // Set to Monday
-            
-            const endOfWeek = new Date(startOfWeek);
-            endOfWeek.setDate(startOfWeek.getDate() + 6); // Set to Sunday
+        const q = query(recipesRef);
+        
+        onSnapshot(q, (snapshot) => {
+            userRecipes = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                userRecipes.push({ id: doc.id, ...data });
+            });
+            renderRecipes();
+            generateShoppingList();
+            console.log(`Loaded ${userRecipes.length} recipes.`);
+        }, (error) => {
+            console.error("Error listening to recipes:", error);
+            recipeList.innerHTML = '<p class="col-span-full text-center text-red-500">Error loading recipes. Check console for details.</p>';
+        });
+    }
 
-            const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-            
-            const startMonth = monthNames[startOfWeek.getMonth()];
-            const startDate = startOfWeek.getDate();
-            const endMonth = monthNames[endOfWeek.getMonth()];
-            const endDate = endOfWeek.getDate();
-
-            return `${startMonth} ${startDate} - ${endMonth} ${endDate}`;
+    /**
+     * Saves or updates a recipe.
+     * @param {object} recipeData - The recipe object.
+     * @param {string} [id] - Optional Firestore document ID for update.
+     */
+    async function saveRecipe(recipeData, id = null) {
+        if (!isAuthReady) {
+            setMessage(searchMessage, "Authentication not ready. Please wait.", 'bg-red-100 text-red-800');
+            return;
         }
         
-        // --- Firebase Core ---
-
-        /**
-         * Initializes Firebase and authenticates the user.
-         */
-        async function initializeFirebase() {
-            if (!firebaseConfig.apiKey) {
-                console.error("Firebase: Configuration is missing API key. Data will not persist.");
-                return;
+        const recipesRef = getRecipeCollectionRef();
+        if (!recipesRef) return;
+        
+        try {
+            if (id) {
+                const docRef = doc(db, recipesRef.path, id);
+                await setDoc(docRef, recipeData, { merge: true });
+                console.log("Recipe updated:", id);
+            } else {
+                const newDocRef = doc(recipesRef);
+                await setDoc(newDocRef, recipeData);
+                console.log("New recipe saved:", newDocRef.id);
             }
+        } catch (e) {
+            console.error("Error saving recipe:", e);
+        }
+    }
+    
+    async function deleteRecipe(id) {
+        if (!isAuthReady) return;
+        // Use custom modal in production, confirm() is used here as a placeholder for quick dev
+        if (!confirm('Are you sure you want to delete this recipe?')) return; 
+        
+        const recipesRef = getRecipeCollectionRef();
+        const docRef = doc(db, recipesRef.path, id);
+        
+        try {
+            await deleteDoc(docRef);
+            console.log("Recipe deleted:", id);
+        } catch (e) {
+            console.error("Error deleting recipe:", e);
+        }
+    }
 
+    // --- AI Search Logic ---
+
+    /**
+     * Common utility for fetching from Gemini API with backoff.
+     */
+    async function fetchWithRetry(payload, maxRetries = MAX_RETRIES) {
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
+                if (attempt > 1) {
+                    const delay = Math.pow(2, attempt - 1) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
 
-                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-                // Setup auth state listener
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                    } else {
-                        // Ensure sign-in if token is missing (fallback to anonymous)
-                         if (token) {
-                            await signInWithCustomToken(auth, token);
-                            userId = auth.currentUser.uid;
-                        } else {
-                            await signInAnonymously(auth);
-                            userId = auth.currentUser.uid;
-                        }
-                    }
-                    
-                    isAuthReady = true;
-                    console.log("User authenticated:", userId);
-                    updateUserInfo(userId);
-                    setupFirestoreListeners(); // Start listeners only when auth is ready
+                // Use the configured API URL which includes the necessary key parameter
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
                 });
 
+                // Check if the response was successful
+                if (response.ok) {
+                    return response.json();
+                }
+
+                // For any non-2xx status, throw an error to trigger retry logic
+                const errorText = await response.text();
+                throw new Error(`API returned status ${response.status}. Details: ${errorText}. (Attempt ${attempt})`);
+
             } catch (error) {
-                console.error("Firebase Initialization or Auth Error:", error);
-            }
-        }
-
-        /**
-         * Updates the UI with the current user ID.
-         * @param {string} id - The user ID to display.
-         */
-        function updateUserInfo(id) {
-             const display = document.getElementById('user-id-display');
-             if (display) {
-                 const span = display.querySelector('span');
-                 span.textContent = id;
-                 display.classList.remove('hidden');
-             }
-        }
-        
-        /**
-         * Sets up Firestore listeners for recipes and meal plans.
-         */
-        function setupFirestoreListeners() {
-            if (!db || !userId || !isAuthReady) return;
-            
-            setupRecipeListener();
-            setupMealPlanListener();
-        }
-
-        // --- Recipe Logic ---
-
-        /**
-         * Utility to save a new recipe document to Firestore.
-         * @param {object} recipeData - The structured recipe data.
-         */
-        async function saveRecipeToFirestore(recipeData) {
-            if (!db || !userId) {
-                console.error("Database or User ID is not ready.");
-                return false;
-            }
-            try {
-                const newRecipeDoc = {
-                    ...recipeData,
-                    createdAt: new Date().toISOString()
-                };
-                
-                // Firestore path: /artifacts/{appId}/users/{userId}/recipes
-                const userRecipesPath = `artifacts/${appId}/users/${userId}/recipes`;
-                const docRef = await addDoc(collection(db, userRecipesPath), newRecipeDoc);
-                console.log("Recipe added with ID: ", docRef.id);
-                return true;
-            } catch (e) {
-                console.error("Critical error saving recipe: ", e);
-                return false;
-            }
-        }
-        
-        function setupRecipeListener() {
-            // MANDATORY PRIVATE DATA PATHING: /artifacts/{appId}/users/{userId}/recipes
-            const userRecipesPath = `artifacts/${appId}/users/${userId}/recipes`;
-            const recipesQuery = query(collection(db, userRecipesPath));
-            const container = document.getElementById('recent-recipes-list');
-            const status = document.getElementById('recipe-list-status');
-
-            onSnapshot(recipesQuery, (snapshot) => {
-                if (!isAuthReady) return; 
-
-                // 1. Update Global Recipe State
-                allRecipes = {};
-                // Clear the container first.
-                container.innerHTML = ''; 
-                
-                if (snapshot.empty) {
-                    if (status) { 
-                        status.textContent = 'You have no recipes yet. Use the "Manual Entry" or "Import URL" buttons to add one!';
-                        status.style.display = 'block'; 
-                        container.appendChild(status);
-                    } else {
-                         console.error("Recipe list status element is missing!");
-                    }
-                } else {
-                    const fragment = document.createDocumentFragment();
-                    snapshot.forEach(doc => {
-                        const recipe = doc.data();
-                        recipe.id = doc.id; 
-                        allRecipes[recipe.id] = recipe; // Populate global state
-                        
-                        // 2. Build Recipe Card UI
-                        const cardElement = document.createElement('div');
-                        cardElement.innerHTML = document.getElementById('recipe-card-template').innerHTML;
-                        const card = cardElement.firstElementChild;
-                        
-                        card.querySelector('[data-name]').textContent = recipe.name || 'Untitled Recipe';
-                        card.querySelector('[data-description]').textContent = recipe.description || 'No description provided.';
-                        card.querySelector('[data-time]').textContent = recipe.time || 'N/A';
-                        card.querySelector('[data-difficulty]').textContent = recipe.difficulty || 'Easy';
-                        card.querySelector('[data-tags]').textContent = 'User Added';
-                        
-                        card.setAttribute('data-doc-id', recipe.id);
-                        card.setAttribute('data-recipe-json', JSON.stringify(recipe));
-                        card.onclick = () => openRecipeDetail(card);
-
-                        fragment.appendChild(card);
-                    });
-                    
-                    container.appendChild(fragment);
-                    console.log(`Real-time update: Displayed ${snapshot.size} recipes for user ${userId}.`);
+                lastError = error;
+                console.error(`Attempt ${attempt} failed with: ${error.message}`);
+                // Throw immediately only if max retries reached. 
+                if (attempt === maxRetries) {
+                    throw lastError;
                 }
-                
-                // 3. Re-render the Plan view (or selection list) now that recipes are updated
-                renderWeeklyPlan(currentPlan); 
-                updateRecipeSelectorList();
-
-            }, (error) => {
-                console.error("Error listening to recipes:", error);
-                if (status) {
-                    status.textContent = 'Error loading recipes. Check console.';
-                }
-            });
+            }
         }
+    }
+
+
+    async function handleAISearch(event) {
+        event.preventDefault();
+        const query = searchQueryInput.value.trim();
+        if (!query) return;
+
+        setLoading(true);
+        setMessage(searchMessage, 'Searching the web and formatting recipe...', 'bg-blue-100 text-blue-800');
+
+        const userQuery = `Find a popular and complete recipe for the following dish: ${query}. Extract the title, a brief description (optional), all ingredients (one item per array element), and step-by-step instructions (one step per array element). Provide the output strictly in the requested JSON format.`;
         
-        /**
-         * Handles form submission for manual recipe entry.
-         */
-        async function handleRecipeSubmission(e) {
-            e.preventDefault();
-            
-            // Get values from form inputs
-            const name = document.getElementById('recipe-name').value.trim();
-            const description = document.getElementById('recipe-description').value.trim();
-            const time = document.getElementById('recipe-time').value.trim() || 'N/A';
-            const difficulty = document.getElementById('recipe-difficulty').value;
-            
-            // Process multi-line textareas into arrays, removing empty lines
-            const ingredientsText = document.getElementById('recipe-ingredients').value;
-            const instructionsText = document.getElementById('recipe-instructions').value;
-
-            const ingredients = ingredientsText.split('\n').map(item => item.trim()).filter(item => item.length > 0);
-            const instructions = instructionsText.split('\n').map(item => item.trim()).filter(item => item.length > 0);
-
-            if (!name) {
-                console.error("Recipe name is required.");
-                return;
+        const payload = {
+            contents: [{ parts: [{ text: userQuery }] }],
+            tools: [{ "google_search": {} }],
+            generationConfig: {
+                responseMimeType: "application/json",
+                responseSchema: recipeSchema
             }
-
-            const recipeData = {
-                name,
-                description,
-                time,
-                difficulty,
-                ingredients,
-                instructions,
-            };
-
-            const saved = await saveRecipeToFirestore(recipeData);
-
-            if (saved) {
-                // Clear and close modal
-                document.getElementById('add-recipe-form').reset();
-                closeModal('add-recipe-modal'); 
-            }
-        }
-
-        // --- LLM and Recipe Import Logic ---
-
-        const RECIPE_SCHEMA = {
-            type: "OBJECT",
-            properties: {
-                "name": { "type": "STRING", "description": "The full title of the recipe." },
-                "description": { "type": "STRING", "description": "A brief one or two sentence summary of the recipe." },
-                "time": { "type": "STRING", "description": "The estimated total preparation and cook time, e.g., '45 min'." },
-                "difficulty": { "type": "STRING", "enum": ["Easy", "Medium", "Hard"], "description": "Difficulty level based on complexity." },
-                "ingredients": {
-                    "type": "ARRAY",
-                    "items": { "type": "STRING", "description": "Each item is a single line, e.g., '1 cup all-purpose flour'." }
-                },
-                "instructions": {
-                    "type": "ARRAY",
-                    "items": { "type": "STRING", "description": "Each item is a single, concise step of the instructions." }
-                }
-            },
-            "required": ["name", "ingredients", "instructions"],
-            "propertyOrdering": ["name", "description", "time", "difficulty", "ingredients", "instructions"]
         };
 
-        const MAX_RETRIES = 3;
+        try {
+            const result = await fetchWithRetry(payload);
+            const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-        /**
-         * Fetches and parses a recipe from a URL using the Gemini API with search grounding.
-         * @param {string} url - The URL to import the recipe from.
-         */
-        async function importRecipeFromUrl(e) {
-            e.preventDefault();
-
-            const url = document.getElementById('recipe-url').value;
-            if (!url) return;
-            
-            const importBtn = document.getElementById('import-recipe-btn');
-            const spinner = document.getElementById('import-spinner');
-            const form = document.getElementById('import-url-form');
-            const statusMessage = document.getElementById('import-status-message');
-            
-            importBtn.disabled = true;
-            importBtn.textContent = 'Importing...';
-            spinner.classList.remove('hidden');
-            statusMessage.classList.add('hidden');
-
-            const systemPrompt = "You are an expert recipe extractor. Given a URL, your task is to accurately extract the recipe's name, description, time, difficulty, ingredients, and instructions. The output MUST strictly adhere to the provided JSON schema. If any field (except name, ingredients, instructions) is not found, omit it or use an empty string/default value like 'N/A' or 'Easy'.";
-            const userQuery = `Find the recipe on this webpage: ${url}. Extract the details into the requested JSON format.`;
-            const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-
-            const payload = {
-                contents: [{ parts: [{ text: userQuery }] }],
-                tools: [{ "google_search": {} }],
-                systemInstruction: { parts: [{ text: systemPrompt }] },
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: RECIPE_SCHEMA
-                }
-            };
-            
-            let recipeData = null;
-            let attempt = 0;
-
-            while (attempt < MAX_RETRIES) {
-                try {
-                    const response = await fetch(apiUrl, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(`API returned status ${response.status}`);
-                    }
-
-                    const result = await response.json();
-                    const candidate = result.candidates?.[0];
-
-                    if (candidate && candidate.content?.parts?.[0]?.text) {
-                        const jsonText = candidate.content.parts[0].text;
-                        recipeData = JSON.parse(jsonText);
-                        break; // Success, exit retry loop
-                    }
-                } catch (error) {
-                    console.error(`Attempt ${attempt + 1} failed:`, error);
-                    attempt++;
-                    if (attempt < MAX_RETRIES) {
-                        await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000)); // Exponential backoff
-                    }
-                }
-            }
-            
-            importBtn.disabled = false;
-            importBtn.textContent = 'Import Recipe';
-            spinner.classList.add('hidden');
-
-            if (recipeData) {
-                console.log("Successfully extracted recipe data:", recipeData);
-                const saved = await saveRecipeToFirestore(recipeData);
-                if (saved) {
-                    form.reset();
-                    closeModal('import-url-modal');
-                    // Automatically switch to the Recipes view
-                    showView('recipes');
-                    return;
-                }
+            if (!jsonText) {
+                throw new Error("The AI did not return a valid structured recipe response.");
             }
 
-            // If we reach here, extraction or saving failed
-            statusMessage.textContent = 'Error: Could not extract recipe from the link or save it. Please check the URL and try again.';
-            statusMessage.classList.remove('hidden');
+            const recipeData = JSON.parse(jsonText);
+            
+            // Validate the parsed data against the required schema keys
+            if (!recipeData.title || !recipeData.ingredients || !recipeData.instructions) {
+                throw new Error("AI returned incomplete recipe data (missing title, ingredients, or instructions).");
+            }
+            
+            // Save to Firestore
+            await saveRecipe(recipeData);
+
+            setMessage(searchMessage, `Successfully imported and saved recipe: "${recipeData.title}"!`, 'bg-green-100 text-green-800');
+            searchQueryInput.value = '';
+            addRecipeModal.classList.add('hidden'); // Close modal on success
+
+        } catch (error) {
+            console.error("AI Search Error:", error);
+            const msg = error.message.includes('401') 
+                ? "API Key Error: Please ensure your environment is configured correctly. The application relies on automatic key injection. Retries failed."
+                : `Failed to import recipe: ${error.message.split('Details:')[0]}. Try a different query.`;
+            setMessage(searchMessage, msg, 'bg-red-100 text-red-800');
+        } finally {
+            setLoading(false);
         }
+    }
 
+    // --- Manual Entry Logic ---
 
-        // --- Recipe Detail Viewer ---
+    function handleManualEntry(event) {
+        event.preventDefault();
         
-        /**
-         * Opens the detail modal and populates it with recipe data.
-         * @param {HTMLElement} cardElement - The clicked recipe card containing data-recipe-json.
-         */
-        function openRecipeDetail(cardElement) {
-            const recipeJson = cardElement.getAttribute('data-recipe-json');
-            if (!recipeJson) return;
-
-            const recipe = JSON.parse(recipeJson);
-            
-            document.getElementById('detail-name').textContent = recipe.name || 'Recipe Details';
-            document.getElementById('detail-description').textContent = recipe.description || 'No detailed description available.';
-            document.querySelector('[data-detail="time"]').textContent = recipe.time || 'N/A';
-            document.querySelector('[data-detail="difficulty"]').textContent = recipe.difficulty || 'N/A';
-            
-            // Ingredients List
-            const ingredientList = document.getElementById('detail-ingredients');
-            ingredientList.innerHTML = '';
-            const ingredients = recipe.ingredients || [];
-            if (Array.isArray(ingredients) && ingredients.length > 0) {
-                ingredients.forEach(ing => {
-                    const li = document.createElement('li');
-                    li.textContent = ing;
-                    ingredientList.appendChild(li);
-                });
-            } else {
-                 ingredientList.innerHTML = '<p class="text-gray-500 italic">No ingredient list available.</p>';
-            }
-
-            // Instructions List
-            const instructionList = document.getElementById('detail-instructions');
-            instructionList.innerHTML = '';
-            const instructions = recipe.instructions || [];
-            if (Array.isArray(instructions) && instructions.length > 0) {
-                instructions.forEach((step, index) => {
-                    const li = document.createElement('li');
-                    // Ensure the step is numbered correctly and avoid double numbering
-                    li.textContent = step.match(/^\d+\.\s*/) 
-                        ? step 
-                        : `${index + 1}. ${step.replace(/^\d+\.\s*/, '')}`;
-                    instructionList.appendChild(li);
-                });
-            } else {
-                 instructionList.innerHTML = '<p class="text-gray-500 italic">No instructions available.</p>';
-            }
-
-            openModal('recipe-detail-modal');
-        }
-
-        // --- Meal Plan Logic ---
+        const recipeData = {
+            title: manualTitleInput.value.trim(),
+            description: '', // Manual entry form is simplified, description is optional
+            ingredients: manualIngredientsInput.value.split('\n').map(s => s.trim()).filter(s => s.length > 0),
+            instructions: manualInstructionsInput.value.split('\n').map(s => s.trim()).filter(s => s.length > 0)
+        };
         
-        /**
-         * Listens for real-time updates to the current week's meal plan.
-         */
-        function setupMealPlanListener() {
-            // Document path: /artifacts/{appId}/users/{userId}/meal_plans/{weekId}
-            const planDocPath = `artifacts/${appId}/users/${userId}/meal_plans/${currentWeekId}`;
-            const planRef = doc(db, planDocPath);
-            
-            document.getElementById('current-week-display').textContent = getWeekDisplay(currentWeekId);
-
-            onSnapshot(planRef, (docSnapshot) => {
-                if (!isAuthReady) return;
-
-                if (docSnapshot.exists()) {
-                    currentPlan = docSnapshot.data();
-                    console.log(`Real-time plan update for ${currentWeekId}.`, currentPlan);
-                } else {
-                    // Initialize empty plan if it doesn't exist
-                    currentPlan = {};
-                    console.log(`No existing plan found for ${currentWeekId}. Initializing empty.`);
-                }
-                
-                // Re-render the plan view with the new data
-                renderWeeklyPlan(currentPlan);
-
-            }, (error) => {
-                console.error("Error listening to meal plan:", error);
-            });
+        if (!recipeData.title || recipeData.ingredients.length === 0 || recipeData.instructions.length === 0) {
+            console.error("Validation Error: Please fill in the title, at least one ingredient, and at least one instruction step.");
+            setMessage(searchMessage, "Please fill in the title, ingredients, and instructions.", 'bg-yellow-100 text-yellow-800');
+            return;
         }
 
-        /**
-         * Renders the meal plan UI based on the fetched data.
-         * @param {Object} planData - The current week's meal plan data.
-         */
-        function renderWeeklyPlan(planData) {
-            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-            const planContainer = document.getElementById('weekly-plan-container');
-            planContainer.innerHTML = ''; // Clear previous content
+        saveRecipe(recipeData).then(() => {
+            manualEntryForm.reset();
+            addRecipeModal.classList.add('hidden');
+        });
+    }
 
-            const fragment = document.createDocumentFragment();
-            
-            // Check if there are ANY assignments this week to display a general empty state message
-            const hasAssignments = Object.values(planData).some(dayPlan => dayPlan && Object.keys(dayPlan).length > 0);
-            
-            if (!hasAssignments) {
-                const emptyPrompt = document.createElement('div');
-                emptyPrompt.innerHTML = '<div class="flex flex-col items-center justify-center p-6 mb-6 bg-white rounded-xl text-center shadow-inner border border-gray-100"><svg class="w-10 h-10 text-gray-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><p class="text-gray-700 font-semibold">Plan is empty for this week.</p><p class="text-gray-500 text-sm mt-1">Tap a slot below to begin scheduling your meals.</p></div>';
-                fragment.appendChild(emptyPrompt.firstElementChild);
-            }
+    // --- UI Helpers ---
 
-            // Always render the day cards to allow interaction (even if empty, they show "Tap to Add")
-            days.forEach(day => {
-                const dayPlan = planData[day] || {};
-                const dayCardHtml = generateDayCardHtml(day, dayPlan);
-                
-                const div = document.createElement('div');
-                div.innerHTML = dayCardHtml;
-                fragment.appendChild(div.firstElementChild);
-            });
-
-            planContainer.appendChild(fragment);
+    function setLoading(isLoading) {
+        searchButton.disabled = isLoading;
+        if (isLoading) {
+            searchButtonText.textContent = 'Processing...';
+            searchSpinner.classList.remove('hidden');
+        } else {
+            searchButtonText.textContent = 'Find & Import Recipe';
+            searchSpinner.classList.add('hidden');
         }
+    }
 
-        /**
-         * Generates the HTML for a single day card in the meal plan.
-         */
-        function generateDayCardHtml(dayName, dayPlan) {
-            const meals = ['Breakfast', 'Lunch', 'Dinner'];
-            return `
-                <div class="bg-light-gray p-4 rounded-xl shadow-md mb-6">
-                    <h3 class="text-xl font-bold text-dark-text mb-4">${dayName}</h3>
-                    <div class="grid grid-cols-3 gap-3">
-                        ${meals.map(mealName => {
-                            const assignment = dayPlan[mealName];
-                            let recipeName = 'Tap to Add';
-                            let classNames = 'dashed-box text-gray-400';
-                            let recipeId = 'none';
-
-                            if (assignment && assignment.recipeId && allRecipes[assignment.recipeId]) {
-                                recipeName = allRecipes[assignment.recipeId].name;
-                                classNames = 'active-meal-slot';
-                                recipeId = assignment.recipeId;
-                            }
-                            
-                            return `
-                                <div class="flex flex-col items-center justify-center h-28 rounded-xl p-2 cursor-pointer transition ${classNames}"
-                                     data-day="${dayName}" data-meal="${mealName}" data-recipe-id="${recipeId}"
-                                     onclick="handleSlotClick(this)">
-                                    <span class="text-xs font-semibold uppercase">${mealName}</span>
-                                    <p class="text-sm font-medium mt-1 text-center line-clamp-2">${recipeName}</p>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                </div>
-            `;
-        }
-
-        /**
-         * Handles the click on a meal slot, opening the selection modal.
-         * @param {HTMLElement} slot - The clicked meal slot element.
-         */
-        function handleSlotClick(slot) {
-            const day = slot.getAttribute('data-day');
-            const meal = slot.getAttribute('data-meal');
-            const recipeId = slot.getAttribute('data-recipe-id');
-
-            currentSelectedSlot = { day, meal, recipeId };
-            
-            document.getElementById('slot-context').textContent = `Assign a recipe to your ${meal} on ${day}:`;
-            
-            // Show/hide remove button based on if a recipe is currently assigned
-            const removeBtn = document.getElementById('remove-meal-btn');
-            removeBtn.style.display = (recipeId && recipeId !== 'none') ? 'block' : 'none';
-
-            openModal('select-recipe-modal');
-        }
-
-        /**
-         * Populates the recipe selection list inside the modal.
-         */
-        function updateRecipeSelectorList() {
-            const listContainer = document.getElementById('recipe-selection-list');
-            listContainer.innerHTML = ''; // Clear list
-            const recipes = Object.values(allRecipes);
-
-            if (recipes.length === 0) {
-                 // Recreate the status message here if no recipes exist
-                 listContainer.innerHTML = '<p class="text-center text-gray-500 italic py-4" id="recipe-select-status">No recipes available to select. Add one first!</p>'; 
-                 return;
-            }
-            
-            recipes.forEach(recipe => {
-                // Determine if this recipe is the one currently assigned to the slot
-                const isSelected = currentSelectedSlot.recipeId === recipe.id;
-                
-                const listItem = document.createElement('div');
-                listItem.className = `p-3 rounded-xl border transition cursor-pointer flex items-center justify-between shadow-sm ${isSelected ? 'border-primary-teal bg-light-gray font-bold' : 'border-gray-200 bg-white hover:bg-gray-50'}`;
-                listItem.setAttribute('data-recipe-id', recipe.id);
-                listItem.onclick = () => saveMealAssignment(recipe.id);
-                
-                listItem.innerHTML = `
-                    <span>${recipe.name}</span>
-                    <span class="text-sm text-gray-500">${recipe.time || 'N/A'}</span>
-                `;
-                listContainer.appendChild(listItem);
-            });
-        }
-
-        /**
-         * Saves the recipe assignment to Firestore.
-         * @param {string} newRecipeId - The ID of the recipe to assign.
-         */
-        async function saveMealAssignment(newRecipeId) {
-            const { day, meal } = currentSelectedSlot;
-            
-            if (!day || !meal || !db || !userId) {
-                console.error("Missing slot context or auth data for saving assignment.");
-                return;
-            }
-
-            try {
-                const planDocPath = `artifacts/${appId}/users/${userId}/meal_plans/${currentWeekId}`;
-                const planRef = doc(db, planDocPath);
-                
-                // Construct the field path for the update: e.g., 'Monday.Dinner.recipeId'
-                const fieldPath = `${day}.${meal}.recipeId`;
-                const assignment = newRecipeId; // We only store the ID
-                
-                // Update the document using dot notation
-                await setDoc(planRef, { [fieldPath]: assignment }, { merge: true });
-
-                console.log(`Meal assigned: ${assignment} to ${day} ${meal}.`);
-                closeModal('select-recipe-modal');
-            } catch (error) {
-                console.error("Error saving meal assignment:", error);
-            }
-        }
+    function setMessage(element, text, classes) {
+        element.textContent = text;
+        element.className = `mt-3 p-3 rounded-lg ${classes}`;
+        element.classList.remove('hidden');
         
-        /**
-         * Removes the recipe assignment from the current slot.
-         */
-        async function removeMealAssignment() {
-            const { day, meal } = currentSelectedSlot;
-            
-            if (!day || !meal || !db || !userId) {
-                console.error("Missing slot context or auth data for removing assignment.");
-                return;
-            }
-
-            try {
-                const planDocPath = `artifacts/${appId}/users/${userId}/meal_plans/${currentWeekId}`;
-                const planRef = doc(db, planDocPath);
-                
-                // Get current plan data
-                const planSnapshot = await getDoc(planRef);
-                let planUpdate = planSnapshot.exists() ? planSnapshot.data() : {};
-                
-                // Delete the meal assignment for the specific day
-                if (planUpdate[day] && planUpdate[day][meal]) {
-                    delete planUpdate[day][meal];
-                    // If the day is now empty, clean it up
-                    if (Object.keys(planUpdate[day]).length === 0) {
-                        delete planUpdate[day];
-                    }
-                }
-                
-                // Overwrite the plan with the updated object
-                await setDoc(planRef, planUpdate);
-
-                console.log(`Meal removed from ${day} ${meal}.`);
-                closeModal('select-recipe-modal');
-            } catch (error) {
-                console.error("Error removing meal assignment:", error);
-            }
+        // Hide message after 5 seconds if not an error
+        if (!classes.includes('bg-red')) {
+            setTimeout(() => element.classList.add('hidden'), 5000);
         }
+    }
 
-        // --- UI Control Functions ---
+    function openModal() {
+        addRecipeModal.classList.remove('hidden');
+        setMessage(searchMessage, 'Enter a search term or switch to Manual Entry.', 'bg-blue-100 text-blue-800');
+        switchInputView('search'); // Reset to search view on open
+    }
 
-        /**
-         * Initializes modal states to ensure they are all hidden on load.
-         */
-        function setupModals() {
-            document.querySelectorAll('.modal-overlay').forEach(modal => {
-                modal.style.display = 'none';
-            });
-            // Ensure the body class that enables the dark overlay is removed at start
-            document.body.classList.remove('modal-active');
-        }
-
-        /**
-         * Opens a specified modal.
-         */
-        function openModal(modalId) {
-            document.body.classList.add('modal-active');
-            const modal = document.getElementById(modalId);
-            if(modal) {
-                modal.style.display = 'flex';
-                // Update the selection list when opening the selector modal
-                if (modalId === 'select-recipe-modal') {
-                    updateRecipeSelectorList();
-                }
-                // Reset URL form status when opening
-                if (modalId === 'import-url-modal') {
-                     document.getElementById('import-status-message').classList.add('hidden');
-                }
-                // Trigger reflow to apply transition
-                void modal.querySelector('.modal-content').offsetWidth;
-                modal.querySelector('.modal-content').style.opacity = '1';
-                modal.querySelector('.modal-content').style.transform = 'translateY(0)';
-            }
-        }
-        
-        /**
-         * Closes a specified modal.
-         */
-        function closeModal(modalId) {
-            const modal = document.getElementById(modalId);
-             if(modal) {
-                modal.querySelector('.modal-content').style.opacity = '0';
-                modal.querySelector('.modal-content').style.transform = 'translateY(20px)';
-                
-                // Use a timeout to hide the display property after transition
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    
-                    // Check if any *other* modal is still open (i.e., has display: flex)
-                    const allOverlays = document.querySelectorAll('.modal-overlay');
-                    // Use .some() for a cleaner check if any item meets the condition
-                    const anyOtherActive = Array.from(allOverlays).some(overlay => overlay.style.display === 'flex');
-
-                    // Only remove the body class (and thus the dark screen) if NO modals are currently open.
-                    if (!anyOtherActive) {
-                       document.body.classList.remove('modal-active');
-                    }
-                }, 300); 
-            }
-        }
-
-
-        /**
-         * Switches the active view with a smooth fade transition.
-         */
-        function showView(viewId, event) {
-            if (event) event.preventDefault(); 
-
-            const views = document.querySelectorAll('.view');
-            const navTabs = document.querySelectorAll('.nav-tab');
-
-            views.forEach(view => {
-                const isActive = view.id === `${viewId}-view`;
-                if (!isActive) {
-                    view.style.display = 'none';
-                    view.classList.remove('active-view');
-                } else {
-                    view.style.display = 'block';
-                    void view.offsetWidth; 
-                    view.classList.add('active-view');
-                }
-            });
-
-            navTabs.forEach(tab => {
-                const tabViewId = tab.getAttribute('data-view');
-                const isCurrent = viewId === tabViewId;
-                
-                tab.classList.toggle('text-primary-teal', isCurrent);
-                tab.classList.toggle('text-gray-500', !isCurrent);
-                
-                const span = tab.querySelector('span');
-                span.classList.toggle('font-semibold', isCurrent);
-                span.classList.toggle('font-medium', !isCurrent);
-
-                const svg = tab.querySelector('svg');
-                // Special handling for Recipes icon which uses fill
-                if (tabViewId === 'recipes') {
-                    svg.setAttribute('fill', isCurrent ? 'currentColor' : 'none');
-                    svg.setAttribute('stroke', isCurrent ? 'none' : 'currentColor');
-                } else {
-                    svg.setAttribute('fill', 'none');
-                    svg.setAttribute('stroke', 'currentColor');
-                }
-            });
-            
-            currentView = viewId;
-        }
-
-        /**
-         * Initialization on DOM load.
-         */
-        document.addEventListener('DOMContentLoaded', () => {
-            initializeFirebase();
-            setupModals(); 
-            
-            // Initial view setup
-            showView(currentView); 
-            
-            // Event listener for the Manual Recipe Submission form
-            document.getElementById('add-recipe-form').addEventListener('submit', handleRecipeSubmission);
-            
-            // New listener for URL import form
-            document.getElementById('import-url-form').addEventListener('submit', importRecipeFromUrl);
+    function switchInputView(viewName) {
+        document.querySelectorAll('.input-tab').forEach(tab => {
+            const isTarget = tab.dataset.input === viewName;
+            tab.classList.toggle('border-orange-500', isTarget);
+            tab.classList.toggle('font-semibold', isTarget);
+            tab.classList.toggle('border-gray-200', !isTarget);
         });
 
-        // Expose functions to the global scope for inline HTML use
-        window.openRecipeDetail = openRecipeDetail;
-        window.closeModal = closeModal;
-        window.showView = showView; 
-        window.handleSlotClick = handleSlotClick;
-        window.saveMealAssignment = saveMealAssignment;
-        window.removeMealAssignment = removeMealAssignment;
+        document.querySelectorAll('.input-view-content').forEach(view => {
+            view.classList.toggle('hidden', view.dataset.inputView !== viewName);
+        });
+    }
+    
+    function switchMainView(viewName) {
+        document.querySelectorAll('.tab-button').forEach(tab => {
+            const isTarget = tab.dataset.tab === viewName;
+            tab.classList.toggle('tab-active', isTarget);
+        });
 
-    </script>
+        document.querySelectorAll('.view-content').forEach(view => {
+            view.classList.toggle('hidden', view.dataset.view !== viewName);
+        });
+        
+        if (viewName === 'shopping') {
+            generateShoppingList();
+        }
+    }
+
+    // --- Rendering Functions ---
+
+    function renderRecipes() {
+        if (!userRecipes.length) {
+            recipeList.innerHTML = '<p class="col-span-full text-center text-gray-500">No recipes found. Use the "Add Recipe" button to get started!</p>';
+            loadingRecipes.classList.add('hidden');
+            return;
+        }
+        
+        loadingRecipes.classList.add('hidden');
+        recipeList.innerHTML = userRecipes.map(recipe => `
+            <div id="recipe-${recipe.id}" class="recipe-card bg-gray-50 p-4 border border-gray-200 rounded-lg shadow-sm">
+                <h3 class="text-xl font-bold text-gray-800 mb-2">${recipe.title}</h3>
+                <p class="text-sm text-gray-500 mb-3">${recipe.ingredients.length} ingredients | ${recipe.instructions.length} steps</p>
+                <div class="flex space-x-2">
+                    <button class="view-recipe text-sm text-blue-600 hover:text-blue-800 font-medium" data-id="${recipe.id}">View Details</button>
+                    <button class="delete-recipe text-sm text-red-600 hover:text-red-800 font-medium" data-id="${recipe.id}">Delete</button>
+                </div>
+            </div>
+        `).join('');
+        
+        // Attach event listeners for dynamic buttons
+        document.querySelectorAll('.delete-recipe').forEach(btn => {
+            btn.addEventListener('click', (e) => deleteRecipe(e.target.dataset.id));
+        });
+        
+        document.querySelectorAll('.view-recipe').forEach(btn => {
+            btn.addEventListener('click', (e) => viewRecipeDetails(e.target.dataset.id));
+        });
+    }
+    
+    function viewRecipeDetails(id) {
+        const recipe = userRecipes.find(r => r.id === id);
+        if (!recipe) return;
+        
+        // Populate the modal
+        detailTitle.textContent = recipe.title;
+        detailDescription.textContent = recipe.description || 'No description provided.';
+        detailDescription.classList.toggle('italic', !recipe.description);
+        
+        // Populate ingredients list
+        detailIngredients.innerHTML = recipe.ingredients.map(item => 
+            `<li class="flex items-start"><svg class="w-4 h-4 mr-2 mt-1 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>${item}</li>`
+        ).join('');
+        
+        // Populate instructions list (using <ol> in HTML for numbered steps)
+        detailInstructions.innerHTML = recipe.instructions.map(step => 
+            `<li class="pl-2">${step}</li>`
+        ).join('');
+        
+        // Show the modal
+        recipeDetailModal.classList.remove('hidden');
+    }
+
+    // --- Shopping List Generation ---
+    function generateShoppingList() {
+        const shoppingMap = new Map();
+
+        userRecipes.forEach(recipe => {
+            recipe.ingredients.forEach(item => {
+                // A simple approach is to just list unique ingredients. 
+                const key = item.toLowerCase().trim();
+                shoppingMap.set(key, (shoppingMap.get(key) || 0) + 1);
+            });
+        });
+
+        if (shoppingMap.size === 0) {
+            shoppingListContainer.innerHTML = '<p class="text-gray-500">Add some recipes to your collection to generate a shopping list!</p>';
+            return;
+        }
+
+        const sortedList = Array.from(shoppingMap.keys()).sort();
+        
+        const listHtml = `
+            <ul class="list-none space-y-2">
+                ${sortedList.map(item => `
+                    <li class="flex items-center p-2 bg-white rounded-md shadow-sm border border-gray-100">
+                        <input type="checkbox" id="item-${item.replace(/\s/g, '-')}" class="w-4 h-4 text-orange-500 border-gray-300 rounded focus:ring-orange-500 mr-3">
+                        <label for="item-${item.replace(/\s/g, '-')}" class="text-gray-700">${item}</label>
+                    </li>
+                `).join('')}
+            </ul>
+        `;
+        shoppingListContainer.innerHTML = listHtml;
+    }
+
+    // --- Event Listeners ---
+    document.addEventListener('DOMContentLoaded', initializeFirebase);
+    
+    // Modal controls (Add Recipe)
+    openAddRecipeModalButton.addEventListener('click', openModal);
+    closeAddRecipeModalButton.addEventListener('click', () => addRecipeModal.classList.add('hidden'));
+
+    // Modal controls (Recipe Details)
+    closeRecipeDetailModal.addEventListener('click', () => recipeDetailModal.classList.add('hidden'));
+    
+    // Input view tabs
+    document.querySelectorAll('.input-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => switchInputView(e.target.dataset.input));
+    });
+
+    // Main view tabs
+    document.querySelectorAll('.tab-button').forEach(tab => {
+        tab.addEventListener('click', (e) => switchMainView(e.target.dataset.tab));
+    });
+
+    // Forms
+    aiSearchForm.addEventListener('submit', handleAISearch);
+    manualEntryForm.addEventListener('submit', handleManualEntry);
+
+</script>
 </body>
 </html>
