@@ -588,19 +588,14 @@
                 container.innerHTML = ''; 
                 
                 if (snapshot.empty) {
-                    if (status) { // FIX 1: Check if status element reference is null before using it
+                    if (status) { 
                         status.textContent = 'You have no recipes yet. Use the "Manual Entry / Add Recipe" button to add one!';
                         status.style.display = 'block'; 
                         container.appendChild(status);
                     } else {
                          console.error("Recipe list status element is missing!");
                     }
-                    
-                    // Removed the problematic access to #recipe-select-status as it is managed by updateRecipeSelectorList()
-
                 } else {
-                    // Since container.innerHTML was cleared, the status element is detached.
-                    
                     const fragment = document.createDocumentFragment();
                     snapshot.forEach(doc => {
                         const recipe = doc.data();
@@ -733,8 +728,12 @@
             if (Array.isArray(instructions) && instructions.length > 0) {
                 instructions.forEach((step, index) => {
                     const li = document.createElement('li');
-                    // Add index number if instructions aren't already numbered
-                    li.textContent = step.match(/^\d+\./) ? step : `${index + 1}. ${step.replace(/^\d+\.\s*/, '')}`;
+                    // FIX: Corrected regex literal in step.replace() which was causing SyntaxError
+                    // The regex checks if the step is already numbered (e.g., "1. ") and removes it 
+                    // before numbering it again, to prevent double numbering.
+                    li.textContent = step.match(/^\d+\./) 
+                        ? step 
+                        : `${index + 1}. ${step.replace(/^\d+\.\s*/, '')}`;
                     instructionList.appendChild(li);
                 });
             } else {
@@ -963,8 +962,18 @@
             }
         }
 
-
         // --- UI Control Functions ---
+
+        /**
+         * Initializes modal states to ensure they are all hidden on load.
+         */
+        function setupModals() {
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.style.display = 'none';
+            });
+            // Ensure the body class that enables the dark overlay is removed at start
+            document.body.classList.remove('modal-active');
+        }
 
         /**
          * Opens a specified modal.
@@ -997,15 +1006,14 @@
                 // Use a timeout to hide the display property after transition
                 setTimeout(() => {
                     modal.style.display = 'none';
-                    // If no other modals are active, remove body active class
-                    const overlays = document.querySelectorAll('.modal-overlay');
-                    let anyActive = false;
-                    overlays.forEach(overlay => {
-                        if (overlay.style.display === 'flex' && overlay.id !== modalId) {
-                            anyActive = true;
-                        }
-                    });
-                    if (!anyActive) {
+                    
+                    // Check if any *other* modal is still open (i.e., has display: flex)
+                    const allOverlays = document.querySelectorAll('.modal-overlay');
+                    // Use .some() for a cleaner check if any item meets the condition
+                    const anyOtherActive = Array.from(allOverlays).some(overlay => overlay.style.display === 'flex');
+
+                    // Only remove the body class (and thus the dark screen) if NO modals are currently open.
+                    if (!anyOtherActive) {
                        document.body.classList.remove('modal-active');
                     }
                 }, 300); 
@@ -1064,6 +1072,7 @@
          */
         document.addEventListener('DOMContentLoaded', () => {
             initializeFirebase();
+            setupModals(); 
             
             // Initial view setup
             showView(currentView); 
